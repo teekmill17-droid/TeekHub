@@ -789,8 +789,7 @@ local function buildUI()
 		for name, page in pages do
 			if name == tabName then
 				page.Visible = true
-				page.GroupTransparency = 1
-				tween(page, {GroupTransparency = 0}, TWEEN_FAST)
+				page.CanvasPosition = Vector2.new(0, 0)
 			else
 				page.Visible = false
 			end
@@ -872,9 +871,6 @@ local function buildUI()
 			pcall(callback, state)
 		end
 		toggle.MouseButton1Click:Connect(doToggle)
-		container.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 then doToggle() end
-		end)
 		container.MouseEnter:Connect(function()
 			tween(container, {BackgroundColor3 = Color3.fromRGB(42, 42, 62)}, TWEEN_FAST)
 		end)
