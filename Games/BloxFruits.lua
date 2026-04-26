@@ -357,8 +357,7 @@ local function buildBFUI()
 		activeTab = tabName
 		for name, page in pages do
 			if name == tabName then
-				page.Visible = true; page.GroupTransparency = 1
-				tween(page, {GroupTransparency = 0}, TWEEN_FAST)
+				page.Visible = true; page.CanvasPosition = Vector2.new(0, 0)
 			else page.Visible = false end
 		end
 		for name, btn in navButtons do
@@ -402,9 +401,6 @@ local function buildBFUI()
 			pcall(callback, state)
 		end
 		t.MouseButton1Click:Connect(toggle)
-		c.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 then toggle() end
-		end)
 		c.MouseEnter:Connect(function() tween(c, {BackgroundColor3 = Color3.fromRGB(42, 42, 62)}, TWEEN_FAST) end)
 		c.MouseLeave:Connect(function() tween(c, {BackgroundColor3 = CARD_BG}, TWEEN_FAST) end)
 		return c
