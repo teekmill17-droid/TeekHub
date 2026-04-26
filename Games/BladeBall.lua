@@ -8,13 +8,24 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 local ParryAttempt = Remotes and Remotes:FindFirstChild("ParryAttempt")
+local RequestAbilityUse = Remotes and Remotes:FindFirstChild("RequestAbilityUse")
+local ActivateAbility = Remotes and Remotes:FindFirstChild("ActivateAbility")
 local BallsFolder = Workspace:FindFirstChild("Balls")
+local AliveFolder = Workspace:FindFirstChild("Alive")
 local BBConfig = {
 	AutoParry_Enabled = false,
 	AutoParry_Mode = "Safe",
+	BallAimbot_Enabled = false,
+	BallAimbot_Target = "Nearest",
+	AutoAbility_Enabled = false,
+	AutoAbility_Dist = 60,
+	AutoDodge_Enabled = false,
+	AutoDodge_Dist = 50,
+	AutoDodge_Speed = 80,
 	BallESP_Enabled = false,
 	PlayerESP_Enabled = false,
 	ParryCount = 0,
+	TargetPlayer = nil,
 }
 local PARRY_DISTS = {Safe = 25, Normal = 35, Risky = 50}
 local DrawingSupported = pcall(function() local t = Drawing.new("Line"); t:Remove() end)
@@ -71,6 +82,34 @@ local function isBallComingAtMe(ballPart, myRoot)
 	ballTargetingMe = toBall.Unit:Dot(vel.Unit) < -0.3
 	return ballTargetingMe, dist
 end
+local function getAimbotTarget()
+	if not BBConfig.BallAimbot_Enabled then return nil end
+	local myRoot = getMyRoot()
+	if not myRoot then return nil end
+	if BBConfig.TargetPlayer then
+		local char = BBConfig.TargetPlayer.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if root then return root end
+	end
+	local best, bestVal = nil, math.huge
+	for _, player in Players:GetPlayers() do
+		if player == LocalPlayer then continue end
+		local char = player.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not root or not hum or hum.Health <= 0 then continue end
+		if BBConfig.BallAimbot_Target == "Nearest" then
+			local dist = (myRoot.Position - root.Position).Magnitude
+			if dist < bestVal then best = root; bestVal = dist end
+		elseif BBConfig.BallAimbot_Target == "Farthest" then
+			local dist = (myRoot.Position - root.Position).Magnitude
+			if dist > bestVal or bestVal == math.huge then best = root; bestVal = -dist end
+		elseif BBConfig.BallAimbot_Target == "Random" then
+			if math.random() > 0.5 then best = root end
+		end
+	end
+	return best
+end
 local parryCooldown = 0
 local function autoParry()
 	if not BBConfig.AutoParry_Enabled then return end
@@ -85,10 +124,61 @@ local function autoParry()
 	if not myRoot then return end
 	local coming, dist = isBallComingAtMe(ball, myRoot)
 	if coming and dist <= (PARRY_DISTS[BBConfig.AutoParry_Mode] or 35) then
+		if BBConfig.BallAimbot_Enabled then
+			local target = getAimbotTarget()
+			if target then
+				pcall(function()
+					myRoot.CFrame = CFrame.lookAt(myRoot.Position, target.Position)
+				end)
+			end
+		end
 		pcall(function() ParryAttempt:FireServer() end)
 		parryCooldown = tick()
 		BBConfig.ParryCount += 1
 	end
+end
+local abilityCooldown = 0
+local function autoAbility()
+	if not BBConfig.AutoAbility_Enabled then return end
+	if tick() - abilityCooldown < 2 then return end
+	if not RequestAbilityUse then
+		RequestAbilityUse = Remotes and Remotes:FindFirstChild("RequestAbilityUse")
+	end
+	if not ActivateAbility then
+		ActivateAbility = Remotes and Remotes:FindFirstChild("ActivateAbility")
+	end
+	local ball = getActiveBall()
+	if not ball then return end
+	local myRoot = getMyRoot()
+	if not myRoot then return end
+	local _, dist = isBallComingAtMe(ball, myRoot)
+	if ballTargetingMe and dist <= BBConfig.AutoAbility_Dist then
+		pcall(function()
+			if RequestAbilityUse then RequestAbilityUse:FireServer() end
+			if ActivateAbility then ActivateAbility:FireServer() end
+		end)
+		abilityCooldown = tick()
+	end
+end
+local dodgeCooldown = 0
+local function autoDodge()
+	if not BBConfig.AutoDodge_Enabled then return end
+	if tick() - dodgeCooldown < 0.1 then return end
+	local ball = getActiveBall()
+	if not ball then return end
+	local myRoot = getMyRoot()
+	if not myRoot then return end
+	if not ballTargetingMe then return end
+	local dist = (myRoot.Position - ball.Position).Magnitude
+	if dist > BBConfig.AutoDodge_Dist then return end
+	local awayDir = (myRoot.Position - ball.Position)
+	if awayDir.Magnitude > 0 then awayDir = awayDir.Unit end
+	local sideDir = Vector3.new(-awayDir.Z, 0, awayDir.X)
+	local moveDir = (sideDir + awayDir * 0.3).Unit
+	pcall(function()
+		myRoot.CFrame = myRoot.CFrame + moveDir * BBConfig.AutoDodge_Speed * 0.016
+	end)
+	dodgeCooldown = tick()
 end
 local function updateBallESP()
 	if not DrawingSupported then return end
@@ -235,7 +325,7 @@ local function buildUI()
 	local pcV = Instance.new("TextLabel"); pcV.Size = UDim2.new(1,-10,0,18); pcV.Position = UDim2.new(0,8,0,20); pcV.BackgroundTransparency = 1; pcV.Text = "0"; pcV.TextColor3 = C.accent; pcV.TextSize = 16; pcV.Font = Enum.Font.GothamBold; pcV.TextXAlignment = Enum.TextXAlignment.Left; pcV.Parent = pcBox
 	local content = Instance.new("Frame"); content.Size = UDim2.new(1,-(SW+14),1,-(TH+10)); content.Position = UDim2.new(0,SW+7,0,TH+5); content.BackgroundTransparency = 1; content.ClipsDescendants = true; content.Parent = main
 	local pages, navBtns, activeTab = {}, {}, nil
-	local tabs = {{n="Parry",i="⚔",d="Auto deflect"},{n="ESP",i="👁",d="Visual overlays"},{n="Info",i="📋",d="Controls"}}
+	local tabs = {{n="Parry",i="⚔",d="Auto deflect"},{n="Aimbot",i="🎯",d="Target players"},{n="Dodge",i="💨",d="Auto evade"},{n="ESP",i="👁",d="Overlays"},{n="Info",i="📋",d="Controls"}}
 	for _, t in tabs do
 		local p = Instance.new("ScrollingFrame"); p.Size = UDim2.new(1,0,1,0); p.BackgroundTransparency = 1; p.ScrollBarThickness = 2; p.ScrollBarImageColor3 = C.accent; p.BorderSizePixel = 0; p.Visible = false; p.CanvasSize = UDim2.new(0,0,0,0); p.AutomaticCanvasSize = Enum.AutomaticSize.Y; p.Parent = content
 		local pl = Instance.new("UIListLayout"); pl.Padding = UDim.new(0,4); pl.SortOrder = Enum.SortOrder.LayoutOrder; pl.Parent = p
@@ -311,6 +401,58 @@ local function buildUI()
 	mkDivider(pp, 2); mkLabel(pp, "AUTO PARRY", 3)
 	mkToggle(pp, "Auto Parry", BBConfig.AutoParry_Enabled, function(v) BBConfig.AutoParry_Enabled = v end, 4)
 	mkCycle(pp, "Timing", {"Safe", "Normal", "Risky"}, BBConfig.AutoParry_Mode, function(v) BBConfig.AutoParry_Mode = v end, 5)
+	mkDivider(pp, 6); mkLabel(pp, "AUTO ABILITY", 7)
+	mkToggle(pp, "Auto Use Ability", BBConfig.AutoAbility_Enabled, function(v) BBConfig.AutoAbility_Enabled = v end, 8)
+	mkCycle(pp, "Trigger Dist", {30, 45, 60, 80, 100}, BBConfig.AutoAbility_Dist, function(v) BBConfig.AutoAbility_Dist = v end, 9)
+	local ap = pages["Aimbot"]; mkLabel(ap, "BALL AIMBOT", 1)
+	mkToggle(ap, "Ball Aimbot", BBConfig.BallAimbot_Enabled, function(v) BBConfig.BallAimbot_Enabled = v end, 2)
+	mkCycle(ap, "Target", {"Nearest", "Farthest", "Random"}, BBConfig.BallAimbot_Target, function(v) BBConfig.BallAimbot_Target = v end, 3)
+	mkDivider(ap, 4); mkLabel(ap, "TARGET PLAYER", 5)
+	local tpScroll = Instance.new("ScrollingFrame"); tpScroll.Size = UDim2.new(1,0,0,120); tpScroll.BackgroundColor3 = C.bg2; tpScroll.BorderSizePixel = 0; tpScroll.LayoutOrder = 6; tpScroll.Parent = ap
+	tpScroll.ScrollBarThickness = 2; tpScroll.ScrollBarImageColor3 = C.accent; tpScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y; tpScroll.CanvasSize = UDim2.new(0,0,0,0)
+	Instance.new("UICorner", tpScroll).CornerRadius = UDim.new(0, 7)
+	local tpLayout = Instance.new("UIListLayout"); tpLayout.Padding = UDim.new(0,2); tpLayout.SortOrder = Enum.SortOrder.LayoutOrder; tpLayout.Parent = tpScroll
+	local function buildTargetList()
+		for _, child in tpScroll:GetChildren() do if child:IsA("TextButton") then child:Destroy() end end
+		local clearBtn = Instance.new("TextButton"); clearBtn.Size = UDim2.new(1,0,0,26); clearBtn.BackgroundColor3 = C.redDim; clearBtn.Text = "  ✕  Clear Target"; clearBtn.TextColor3 = C.textDim
+		clearBtn.TextSize = 11; clearBtn.Font = Enum.Font.GothamMedium; clearBtn.TextXAlignment = Enum.TextXAlignment.Left; clearBtn.BorderSizePixel = 0; clearBtn.LayoutOrder = 0; clearBtn.Parent = tpScroll
+		Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 5)
+		clearBtn.MouseButton1Click:Connect(function()
+			BBConfig.TargetPlayer = nil
+			tw(clearBtn, {BackgroundColor3 = C.green}, TF)
+			task.delay(0.3, function() tw(clearBtn, {BackgroundColor3 = C.redDim}, TF) end)
+		end)
+		local ord = 1
+		for _, player in Players:GetPlayers() do
+			if player == LocalPlayer then continue end
+			ord += 1
+			local pb = Instance.new("TextButton"); pb.Size = UDim2.new(1,0,0,26); pb.BackgroundColor3 = C.card
+			pb.Text = "  🎯  " .. player.DisplayName; pb.TextColor3 = C.text; pb.TextSize = 11
+			pb.Font = Enum.Font.GothamMedium; pb.TextXAlignment = Enum.TextXAlignment.Left
+			pb.BorderSizePixel = 0; pb.LayoutOrder = ord; pb.AutoButtonColor = false; pb.Parent = tpScroll
+			Instance.new("UICorner", pb).CornerRadius = UDim.new(0, 5)
+			pb.MouseButton1Click:Connect(function()
+				BBConfig.TargetPlayer = player
+				BBConfig.BallAimbot_Target = "Specific"
+				tw(pb, {BackgroundColor3 = C.accent}, TF)
+				task.delay(0.4, function() tw(pb, {BackgroundColor3 = C.card}, TF) end)
+			end)
+			pb.MouseEnter:Connect(function() tw(pb, {BackgroundColor3 = C.cardHover}, TF) end)
+			pb.MouseLeave:Connect(function() tw(pb, {BackgroundColor3 = C.card}, TF) end)
+		end
+	end
+	buildTargetList()
+	Players.PlayerAdded:Connect(function() task.wait(1); buildTargetList() end)
+	Players.PlayerRemoving:Connect(function(p) if BBConfig.TargetPlayer == p then BBConfig.TargetPlayer = nil end; task.wait(0.5); buildTargetList() end)
+	local dp = pages["Dodge"]; mkLabel(dp, "AUTO DODGE", 1)
+	mkToggle(dp, "Auto Dodge", BBConfig.AutoDodge_Enabled, function(v) BBConfig.AutoDodge_Enabled = v end, 2)
+	mkCycle(dp, "Trigger Dist", {30, 40, 50, 70, 100}, BBConfig.AutoDodge_Dist, function(v) BBConfig.AutoDodge_Dist = v end, 3)
+	mkCycle(dp, "Dodge Speed", {40, 60, 80, 100, 150}, BBConfig.AutoDodge_Speed, function(v) BBConfig.AutoDodge_Speed = v end, 4)
+	mkDivider(dp, 5); mkLabel(dp, "HOW IT WORKS", 6)
+	local dodgeInfo = Instance.new("TextLabel"); dodgeInfo.Size = UDim2.new(1,0,0,50); dodgeInfo.BackgroundColor3 = C.card; dodgeInfo.BorderSizePixel = 0; dodgeInfo.LayoutOrder = 7; dodgeInfo.Parent = dp
+	dodgeInfo.Text = "  Moves you sideways + away\n  from the ball when it targets\n  you. Combine with Auto Parry."; dodgeInfo.TextColor3 = C.textDim
+	dodgeInfo.TextSize = 10; dodgeInfo.Font = Enum.Font.Gotham; dodgeInfo.TextWrapped = true; dodgeInfo.TextXAlignment = Enum.TextXAlignment.Left; dodgeInfo.TextYAlignment = Enum.TextYAlignment.Center
+	Instance.new("UICorner", dodgeInfo).CornerRadius = UDim.new(0, 7)
 	local ep = pages["ESP"]; mkLabel(ep, "BALL TRACKING", 1)
 	mkToggle(ep, "Ball ESP", BBConfig.BallESP_Enabled, function(v) BBConfig.BallESP_Enabled = v end, 2)
 	mkDivider(ep, 3); mkLabel(ep, "PLAYER VISUALS", 4)
@@ -325,6 +467,8 @@ local function buildUI()
 	mkInfoRow(ip, "Toggle UI", "RightCtrl", 2); mkInfoRow(ip, "Manual Parry", "F / Left Click", 3); mkInfoRow(ip, "Ability", "Q / Right Click", 4)
 	mkDivider(ip, 5); mkLabel(ip, "TIMING MODES", 6)
 	mkInfoRow(ip, "Safe (25 studs)", "Early, reliable", 7); mkInfoRow(ip, "Normal (35 studs)", "Balanced", 8); mkInfoRow(ip, "Risky (50 studs)", "Late, may miss", 9)
+	mkDivider(ip, 10); mkLabel(ip, "FEATURES", 11)
+	mkInfoRow(ip, "Ball Aimbot", "Aims ball at target", 12); mkInfoRow(ip, "Auto Ability", "Uses Q on approach", 13); mkInfoRow(ip, "Auto Dodge", "Strafe from ball", 14)
 	switchTab("Parry")
 	task.spawn(function()
 		while task.wait(0.15) do
@@ -352,7 +496,7 @@ local function buildUI()
 end
 local gui = buildUI()
 RunService.RenderStepped:Connect(function()
-	pcall(autoParry); pcall(updateBallESP); pcall(updatePlayerESP)
+	pcall(autoParry); pcall(autoAbility); pcall(autoDodge); pcall(updateBallESP); pcall(updatePlayerESP)
 end)
 Players.PlayerRemoving:Connect(function(p)
 	if PlayerESPCache[p] then pcall(function() PlayerESPCache[p].Box:Remove(); PlayerESPCache[p].Name:Remove() end); PlayerESPCache[p] = nil end
