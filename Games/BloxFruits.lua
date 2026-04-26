@@ -19,6 +19,8 @@ local BFConfig = {
 	FastAttack_Enabled = false,
 	BringMobs_Enabled = false,
 	BringMobs_Range = 100,
+	KillAura_Enabled = false,
+	KillAura_Range = 40,
 	ServerHop_Enabled = false,
 }
 local Utility = {}
@@ -143,42 +145,60 @@ local function updateChestESP()
 		end)
 	end
 end
-local function findNearestMob()
+local Net = ReplicatedStorage:FindFirstChild("Modules") and ReplicatedStorage.Modules:FindFirstChild("Net")
+local RegisterAttack = Net and Net:FindFirstChild("RE/RegisterAttack")
+local RegisterHit = Net and Net:FindFirstChild("RE/RegisterHit")
+local EnemiesFolder = Workspace:FindFirstChild("Enemies")
+local function getMobsInRange(range)
 	local _, myRoot = Utility.getCharacterParts(LocalPlayer)
-	if not myRoot then return nil, nil end
-	local closest, closestDist = nil, BFConfig.AutoFarm_Range
-	for _, mob in Workspace:GetDescendants() do
+	if not myRoot then return {} end
+	local mobs = {}
+	local folder = EnemiesFolder or Workspace
+	for _, mob in folder:GetChildren() do
 		pcall(function()
-			if mob:IsA("Model") and mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChildOfClass("Humanoid") then
-				local hum = mob:FindFirstChildOfClass("Humanoid")
-				if hum.Health > 0 and mob ~= LocalPlayer.Character then
-					local isNPC = not Players:GetPlayerFromCharacter(mob)
-					if isNPC then
-						local dist = (myRoot.Position - mob.HumanoidRootPart.Position).Magnitude
-						if dist < closestDist then
-							closest = mob; closestDist = dist
-						end
-					end
+			local hum = mob:FindFirstChildOfClass("Humanoid")
+			local root = mob:FindFirstChild("HumanoidRootPart")
+			if hum and root and hum.Health > 0 then
+				local dist = (myRoot.Position - root.Position).Magnitude
+				if dist <= range then
+					table.insert(mobs, {model = mob, root = root, hum = hum, dist = dist})
 				end
 			end
 		end)
 	end
-	return closest, closestDist
+	table.sort(mobs, function(a, b) return a.dist < b.dist end)
+	return mobs
+end
+local function findNearestMob()
+	local mobs = getMobsInRange(BFConfig.AutoFarm_Range)
+	if #mobs > 0 then return mobs[1].model, mobs[1].dist end
+	return nil, nil
 end
 local function autoFarm()
 	if not BFConfig.AutoFarm_Enabled then return end
+	if not RegisterAttack or not RegisterHit then return end
 	pcall(function()
-		local mob = findNearestMob()
-		if mob and mob:FindFirstChild("HumanoidRootPart") then
-			local _, myRoot = Utility.getCharacterParts(LocalPlayer)
-			if myRoot then
-				myRoot.CFrame = mob.HumanoidRootPart.CFrame * CFrame.new(0, 0, -3)
-			end
+		local _, myRoot = Utility.getCharacterParts(LocalPlayer)
+		if not myRoot then return end
+		local mobs = getMobsInRange(BFConfig.AutoFarm_Range)
+		for _, mob in mobs do
 			pcall(function()
-				local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
-				if tool and tool:FindFirstChild("RemoteEvent") then
-					tool.RemoteEvent:FireServer()
-				end
+				myRoot.CFrame = mob.root.CFrame * CFrame.new(0, 0, -2)
+				RegisterAttack:FireServer(tick() % 1)
+				RegisterHit:FireServer(mob.root, {mob.root}, nil, "109485d1")
+			end)
+		end
+	end)
+end
+local function killAura()
+	if not BFConfig.KillAura_Enabled then return end
+	if not RegisterAttack or not RegisterHit then return end
+	pcall(function()
+		local mobs = getMobsInRange(BFConfig.KillAura_Range)
+		for _, mob in mobs do
+			pcall(function()
+				RegisterAttack:FireServer(tick() % 1)
+				RegisterHit:FireServer(mob.root, {mob.root}, nil, "109485d1")
 			end)
 		end
 	end)
@@ -188,15 +208,15 @@ local function bringMobs()
 	pcall(function()
 		local _, myRoot = Utility.getCharacterParts(LocalPlayer)
 		if not myRoot then return end
-		for _, mob in Workspace:GetDescendants() do
+		local folder = EnemiesFolder or Workspace
+		for _, mob in folder:GetChildren() do
 			pcall(function()
-				if mob:IsA("Model") and mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChildOfClass("Humanoid") then
-					local hum = mob:FindFirstChildOfClass("Humanoid")
-					if hum.Health > 0 and not Players:GetPlayerFromCharacter(mob) then
-						local dist = (myRoot.Position - mob.HumanoidRootPart.Position).Magnitude
-						if dist < BFConfig.BringMobs_Range then
-							mob.HumanoidRootPart.CFrame = myRoot.CFrame * CFrame.new(0, 0, -5)
-						end
+				local hum = mob:FindFirstChildOfClass("Humanoid")
+				local root = mob:FindFirstChild("HumanoidRootPart")
+				if hum and root and hum.Health > 0 then
+					local dist = (myRoot.Position - root.Position).Magnitude
+					if dist < BFConfig.BringMobs_Range then
+						root.CFrame = myRoot.CFrame * CFrame.new(0, 0, -5)
 					end
 				end
 			end)
@@ -436,16 +456,17 @@ local function buildBFUI()
 	end
 	local farm = pages["Farm"]
 	makeLabel(farm, "AUTO FARM", 1)
-	makeToggle(farm, "Auto Farm", BFConfig.AutoFarm_Enabled, function(v) BFConfig.AutoFarm_Enabled = v end, 2)
+	makeToggle(farm, "Auto Farm (TP + Kill)", BFConfig.AutoFarm_Enabled, function(v) BFConfig.AutoFarm_Enabled = v end, 2)
 	makeCycle(farm, "Farm Range", {30, 50, 100, 200, 500}, BFConfig.AutoFarm_Range, function(v) BFConfig.AutoFarm_Range = v end, 3)
-	makeToggle(farm, "Bring Mobs", BFConfig.BringMobs_Enabled, function(v) BFConfig.BringMobs_Enabled = v end, 4)
-	makeCycle(farm, "Bring Range", {50, 100, 200, 500}, BFConfig.BringMobs_Range, function(v) BFConfig.BringMobs_Range = v end, 5)
-	makeLabel(farm, "QUESTS", 6)
-	makeToggle(farm, "Auto Quest", BFConfig.AutoQuest_Enabled, function(v) BFConfig.AutoQuest_Enabled = v end, 7)
-	makeToggle(farm, "Auto Raid", BFConfig.AutoRaid_Enabled, function(v) BFConfig.AutoRaid_Enabled = v end, 8)
-	makeLabel(farm, "COMBAT", 9)
-	makeToggle(farm, "Fast Attack", BFConfig.FastAttack_Enabled, function(v) BFConfig.FastAttack_Enabled = v end, 10)
-	makeToggle(farm, "Auto Bounty", BFConfig.AutoBounty_Enabled, function(v) BFConfig.AutoBounty_Enabled = v end, 11)
+	makeLabel(farm, "KILL AURA", 4)
+	makeToggle(farm, "Kill Aura (no TP)", BFConfig.KillAura_Enabled, function(v) BFConfig.KillAura_Enabled = v end, 5)
+	makeCycle(farm, "Aura Range", {20, 40, 60, 100, 200}, BFConfig.KillAura_Range, function(v) BFConfig.KillAura_Range = v end, 6)
+	makeLabel(farm, "MOBS", 7)
+	makeToggle(farm, "Bring Mobs", BFConfig.BringMobs_Enabled, function(v) BFConfig.BringMobs_Enabled = v end, 8)
+	makeCycle(farm, "Bring Range", {50, 100, 200, 500}, BFConfig.BringMobs_Range, function(v) BFConfig.BringMobs_Range = v end, 9)
+	makeLabel(farm, "COMBAT", 10)
+	makeToggle(farm, "Fast Attack", BFConfig.FastAttack_Enabled, function(v) BFConfig.FastAttack_Enabled = v end, 11)
+	makeToggle(farm, "Auto Bounty", BFConfig.AutoBounty_Enabled, function(v) BFConfig.AutoBounty_Enabled = v end, 12)
 	local esp = pages["ESP"]
 	makeLabel(esp, "WORLD ESP", 1)
 	makeToggle(esp, "Fruit ESP", BFConfig.FruitESP_Enabled, function(v) BFConfig.FruitESP_Enabled = v end, 2)
@@ -470,6 +491,7 @@ end
 local gui = buildBFUI()
 RunService.RenderStepped:Connect(function()
 	pcall(autoFarm)
+	pcall(killAura)
 	pcall(bringMobs)
 	pcall(fruitSniper)
 	pcall(updateFruitESP)
