@@ -3,6 +3,7 @@ local SUPPORTED_GAMES = {
 	[2753915549] = "Games/BloxFruits.lua",
 	[13772394625] = "Games/BladeBall.lua",
 	[16044264830] = "Games/BladeBall.lua",
+	[16732694052] = "Games/Fisch.lua",
 	-- Add more: [placeId] = "Games/ScriptName.lua",
 }
 local KEY_ENABLED = true
