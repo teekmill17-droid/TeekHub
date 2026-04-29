@@ -38,7 +38,7 @@ local JBConfig = {
 	AutoBank_Enabled = false,
 	AutoJewelry_Enabled = false,
 	AutoPickpocket_Enabled = false,
-	SmoothTP_Speed = 200,
+	SmoothTP_Speed = 50,
 }
 local SPOTS = {
 	{name = "Bank", pos = CFrame.new(32, 18, 822)},
@@ -146,9 +146,10 @@ local function smoothTeleport(targetCF)
 	local dist = (endPos - startPos).Magnitude
 	if dist < 5 then root.CFrame = typeof(targetCF) == "CFrame" and targetCF or CFrame.new(targetCF); return end
 	local speed = JBConfig.SmoothTP_Speed
-	local stepSize = speed * 0.03
+	local waitTime = 0.06
+	local stepSize = speed * waitTime
 	local steps = math.ceil(dist / stepSize)
-	steps = math.min(steps, 500)
+	steps = math.min(steps, 2000)
 	for i = 1, steps do
 		root = getMyRoot()
 		if not root or not root.Parent then return end
@@ -160,7 +161,8 @@ local function smoothTeleport(targetCF)
 			root.Velocity = Vector3.zero
 			root.AssemblyLinearVelocity = Vector3.zero
 		end)
-		task.wait(0.03)
+		RunService.Heartbeat:Wait()
+		task.wait(waitTime)
 	end
 	root = getMyRoot()
 	if root then root.CFrame = typeof(targetCF) == "CFrame" and targetCF or CFrame.new(targetCF) end
@@ -662,7 +664,7 @@ local function buildUI()
 	mkToggle(ar,"Auto Collect Reward",JBConfig.AutoReward_Enabled,function(v) JBConfig.AutoReward_Enabled = v end,9)
 	mkButton(ar,"💰  Collect Reward Now",C.accent,function() collectReward() end,10)
 	mkDivider(ar,11); mkLabel(ar,"SETTINGS",12)
-	mkCycle(ar,"TP Speed",{100,150,200,300,500},JBConfig.SmoothTP_Speed,function(v) JBConfig.SmoothTP_Speed = v end,13)
+	mkCycle(ar,"TP Speed",{30,50,75,100,150},JBConfig.SmoothTP_Speed,function(v) JBConfig.SmoothTP_Speed = v end,13)
 	mkDivider(ar,14); mkLabel(ar,"QUICK TRAVEL",15)
 	mkButton(ar,"🏦  Go to Bank",C.card,function() teleportTo(CFrame.new(32, 18, 822)) end,16)
 	mkButton(ar,"💎  Go to Jewelry",C.card,function() teleportTo(CFrame.new(142, 18, 1365)) end,17)
@@ -746,9 +748,12 @@ local function buildUI()
 	mkInfoRow(misc,"Aimbot","Hold RMB",13)
 	mkInfoRow(misc,"Fly Controls","WASD + Space/Shift",14)
 	mkInfoRow(misc,"Smooth TP","Anti-cheat safe",15)
+	mkDivider(misc,16); mkLabel(misc,"SCRIPT",17)
+	mkButton(misc,"🗑  Unload TeekHub",C.red,function() unloadHub() end,18)
 	switchTab("Auto Rob")
+local hubAlive = true
 	task.spawn(function()
-		while task.wait(0.5) do
+		while hubAlive and task.wait(0.5) do
 			pcall(function()
 				local team = getPlayerTeam(LP)
 				local col = TEAM_COLORS[team] or C.safe
@@ -756,27 +761,28 @@ local function buildUI()
 			end)
 		end
 	end)
-	return sg
+	return sg, function() hubAlive = false end
 end
-local gui = buildUI()
-RunService.RenderStepped:Connect(function()
+local Connections = {}
+local gui, killStatusLoop = buildUI()
+Connections[#Connections+1] = RunService.RenderStepped:Connect(function()
 	pcall(updateESP)
 	pcall(updateAimbot)
 	pcall(applyCharacterMods)
 	pcall(updateNitro)
 end)
-Players.PlayerRemoving:Connect(function(p)
+Connections[#Connections+1] = Players.PlayerRemoving:Connect(function(p)
 	if ESPCache[p] then
 		pcall(function() for _,obj in ESPCache[p] do obj:Remove() end end)
 		ESPCache[p] = nil
 	end
 end)
-LP.CharacterAdded:Connect(function()
+Connections[#Connections+1] = LP.CharacterAdded:Connect(function()
 	task.wait(0.5)
 	applyCharacterMods()
 	if JBConfig.FlyEnabled then stopFly(); task.wait(0.2); startFly() end
 end)
-UserInputService.InputBegan:Connect(function(input, processed)
+Connections[#Connections+1] = UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
 	if input.KeyCode == Enum.KeyCode.RightControl then
 		local mf = gui.MainFrame
@@ -789,6 +795,21 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		end
 	end
 end)
+function unloadHub()
+	stopAutoRob()
+	stopPickpocket()
+	stopFly()
+	stopNoClip()
+	disableAntiAFK()
+	disableFullbright()
+	for _, conn in Connections do pcall(function() conn:Disconnect() end) end
+	for _, d in ESPCache do pcall(function() for _,obj in d do obj:Remove() end end) end
+	ESPCache = {}
+	if FOVCircle then pcall(function() FOVCircle:Remove() end) end
+	if killStatusLoop then killStatusLoop() end
+	pcall(function() gui:Destroy() end)
+	print("[TeekHub] Unloaded — all features disabled")
+end
 print("[TeekHub] Jailbreak v2 loaded")
 print("[TeekHub] Auto Rob | Teleport | ESP | Aimbot | Movement | Misc")
 print("[TeekHub] Smooth TP enabled — anti-cheat safe movement")
