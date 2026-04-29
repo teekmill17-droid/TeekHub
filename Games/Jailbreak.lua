@@ -6,6 +6,7 @@ local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LP = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
+local VIM = game:GetService("VirtualInputManager")
 local JBConfig = {
 	ESP_Enabled = false,
 	ESP_ShowBoxes = true,
@@ -34,6 +35,10 @@ local JBConfig = {
 	InfNitro_Enabled = false,
 	AutoReward_Enabled = false,
 	AntiAFK_Enabled = false,
+	AutoBank_Enabled = false,
+	AutoJewelry_Enabled = false,
+	AutoPickpocket_Enabled = false,
+	SmoothTP_Speed = 200,
 }
 local SPOTS = {
 	{name = "Bank", pos = CFrame.new(32, 18, 822)},
@@ -60,17 +65,28 @@ local SPOTS = {
 	{name = "Donut Shop", pos = CFrame.new(-310, 18, 1660)},
 	{name = "1M Dealership", pos = CFrame.new(-905, 18, -395)},
 }
+local BANK_WAYPOINTS = {
+	CFrame.new(32, 18, 822),
+	CFrame.new(28, 18, 782),
+	CFrame.new(18, 0, 770),
+	CFrame.new(18, -8, 760),
+	CFrame.new(18, -8, 740),
+}
+local JEWELRY_WAYPOINTS = {
+	CFrame.new(142, 18, 1365),
+	CFrame.new(130, 18, 1355),
+	CFrame.new(130, 22, 1340),
+	CFrame.new(130, 30, 1340),
+	CFrame.new(130, 40, 1340),
+	CFrame.new(130, 50, 1340),
+}
+local CRIMINAL_BASE = CFrame.new(-222, 18, 1590)
 local TEAM_COLORS = {
 	Cop = Color3.fromRGB(80, 140, 255),
 	Criminal = Color3.fromRGB(255, 80, 60),
 	Prisoner = Color3.fromRGB(255, 165, 40),
 	Unknown = Color3.fromRGB(200, 200, 200),
 }
-local function teleportTo(cf)
-	local char = LP.Character
-	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if root then root.CFrame = typeof(cf) == "CFrame" and cf or CFrame.new(cf) end
-end
 local function getMyRoot()
 	local char = LP.Character
 	return char and char:FindFirstChild("HumanoidRootPart")
@@ -113,6 +129,157 @@ local function predictPosition(targetPart, fromPosition)
 	if velocity.Magnitude < 2 then return targetPart.Position end
 	local travelTime = distance / 1000
 	return targetPart.Position + (velocity * travelTime)
+end
+local function setNoclipChar(enabled)
+	pcall(function()
+		local char = LP.Character; if not char then return end
+		for _, part in char:GetDescendants() do
+			if part:IsA("BasePart") then part.CanCollide = not enabled end
+		end
+	end)
+end
+local function smoothTeleport(targetCF)
+	local root = getMyRoot()
+	if not root then return end
+	local startPos = root.Position
+	local endPos = typeof(targetCF) == "CFrame" and targetCF.Position or targetCF
+	local dist = (endPos - startPos).Magnitude
+	if dist < 5 then root.CFrame = typeof(targetCF) == "CFrame" and targetCF or CFrame.new(targetCF); return end
+	local speed = JBConfig.SmoothTP_Speed
+	local stepSize = speed * 0.03
+	local steps = math.ceil(dist / stepSize)
+	steps = math.min(steps, 500)
+	for i = 1, steps do
+		root = getMyRoot()
+		if not root or not root.Parent then return end
+		local alpha = i / steps
+		local newPos = startPos:Lerp(endPos, alpha)
+		root.CFrame = CFrame.new(newPos)
+		setNoclipChar(true)
+		pcall(function()
+			root.Velocity = Vector3.zero
+			root.AssemblyLinearVelocity = Vector3.zero
+		end)
+		task.wait(0.03)
+	end
+	root = getMyRoot()
+	if root then root.CFrame = typeof(targetCF) == "CFrame" and targetCF or CFrame.new(targetCF) end
+end
+local function teleportTo(cf)
+	smoothTeleport(cf)
+end
+local function collectReward()
+	pcall(function()
+		for _, v in ReplicatedStorage:GetDescendants() do
+			if v.Name == "RewardSpinnerCollectReward" and v:IsA("RemoteEvent") then
+				v:FireServer("RobberyBonusReward")
+			end
+		end
+	end)
+end
+local function findNearestCop()
+	local closest, closestDist = nil, math.huge
+	for _, player in Players:GetPlayers() do
+		if player == LP then continue end
+		local team = getPlayerTeam(player)
+		if team ~= "Cop" then continue end
+		local char = player.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not root then continue end
+		local d = distanceTo(root.Position)
+		if d < closestDist then closestDist = d; closest = player end
+	end
+	return closest
+end
+local autoRobActive = false
+local function autoBank()
+	if autoRobActive then return end
+	autoRobActive = true
+	task.spawn(function()
+		while JBConfig.AutoBank_Enabled and autoRobActive do
+			pcall(function()
+				for _, wp in BANK_WAYPOINTS do
+					if not JBConfig.AutoBank_Enabled then break end
+					smoothTeleport(wp)
+					task.wait(1)
+				end
+				if JBConfig.AutoBank_Enabled then
+					task.wait(15)
+					smoothTeleport(CRIMINAL_BASE)
+					task.wait(3)
+					collectReward()
+					task.wait(5)
+				end
+			end)
+			if JBConfig.AutoBank_Enabled then
+				task.wait(120)
+			end
+		end
+		autoRobActive = false
+	end)
+end
+local function stopAutoRob()
+	autoRobActive = false
+	JBConfig.AutoBank_Enabled = false
+	JBConfig.AutoJewelry_Enabled = false
+end
+local function autoJewelry()
+	if autoRobActive then return end
+	autoRobActive = true
+	task.spawn(function()
+		while JBConfig.AutoJewelry_Enabled and autoRobActive do
+			pcall(function()
+				for _, wp in JEWELRY_WAYPOINTS do
+					if not JBConfig.AutoJewelry_Enabled then break end
+					smoothTeleport(wp)
+					task.wait(2)
+				end
+				if JBConfig.AutoJewelry_Enabled then
+					task.wait(10)
+					smoothTeleport(CRIMINAL_BASE)
+					task.wait(3)
+					collectReward()
+					task.wait(5)
+				end
+			end)
+			if JBConfig.AutoJewelry_Enabled then
+				task.wait(120)
+			end
+		end
+		autoRobActive = false
+	end)
+end
+local pickpocketActive = false
+local function autoPickpocket()
+	if pickpocketActive then return end
+	pickpocketActive = true
+	task.spawn(function()
+		while JBConfig.AutoPickpocket_Enabled and pickpocketActive do
+			pcall(function()
+				local cop = findNearestCop()
+				if not cop then task.wait(2); return end
+				local char = cop.Character
+				local root = char and char:FindFirstChild("HumanoidRootPart")
+				if not root then task.wait(1); return end
+				local behindCF = root.CFrame * CFrame.new(0, 0, 3)
+				smoothTeleport(behindCF)
+				task.wait(0.3)
+				pcall(function()
+					VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+				end)
+				task.wait(1.5)
+				pcall(function()
+					VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+				end)
+				task.wait(1)
+			end)
+		end
+		pickpocketActive = false
+	end)
+end
+local function stopPickpocket()
+	pickpocketActive = false
+	JBConfig.AutoPickpocket_Enabled = false
 end
 local DrawingSupported = pcall(function() local t = Drawing.new("Line"); t:Remove() end)
 local ESPCache = {}
@@ -265,12 +432,7 @@ local NoClipConnection = nil
 local function startNoClip()
 	NoClipConnection = RunService.Stepped:Connect(function()
 		if not JBConfig.NoClipEnabled then return end
-		pcall(function()
-			local char = LP.Character; if not char then return end
-			for _, part in char:GetDescendants() do
-				if part:IsA("BasePart") then part.CanCollide = false end
-			end
-		end)
+		setNoclipChar(true)
 	end)
 end
 local function stopNoClip()
@@ -315,10 +477,7 @@ local AntiAFKConnection = nil
 local function enableAntiAFK()
 	pcall(function()
 		AntiAFKConnection = LP.Idled:Connect(function()
-			pcall(function()
-				local vim = game:GetService("VirtualInputManager")
-				vim:SendMouseMoveEvent(1, 0, game); vim:SendMouseMoveEvent(-1, 0, game)
-			end)
+			pcall(function() VIM:SendMouseMoveEvent(1, 0, game); VIM:SendMouseMoveEvent(-1, 0, game) end)
 		end)
 	end)
 end
@@ -338,21 +497,6 @@ local function updateNitro()
 				if (v.Name == "Nitro" or v.Name == "NitroAmount" or v.Name:lower():find("nitro")) and v:IsA("ValueBase") then
 					if typeof(v.Value) == "number" then v.Value = 100 end
 				end
-			end
-			for attrName, attrVal in vehicle:GetAttributes() do
-				if attrName:lower():find("nitro") and typeof(attrVal) == "number" then
-					vehicle:SetAttribute(attrName, 100)
-				end
-			end
-		end
-	end)
-end
-local function updateAutoReward()
-	if not JBConfig.AutoReward_Enabled then return end
-	pcall(function()
-		for _, v in ReplicatedStorage:GetDescendants() do
-			if v.Name == "RewardSpinnerCollectReward" and v:IsA("RemoteEvent") then
-				v:FireServer("RobberyBonusReward")
 			end
 		end
 	end)
@@ -387,9 +531,9 @@ local function buildUI()
 	local icoT = Instance.new("TextLabel"); icoT.Size = UDim2.new(1,0,1,0); icoT.BackgroundTransparency = 1; icoT.Text = "🚔"; icoT.TextColor3 = C.text; icoT.TextSize = 14; icoT.Font = Enum.Font.GothamBold; icoT.Parent = ico
 	local ttl = Instance.new("TextLabel"); ttl.Size = UDim2.new(0,100,0,16); ttl.Position = UDim2.new(0,44,0,5); ttl.BackgroundTransparency = 1; ttl.Text = "TeekHub"; ttl.TextColor3 = C.text; ttl.TextSize = 14; ttl.Font = Enum.Font.GothamBold; ttl.TextXAlignment = Enum.TextXAlignment.Left; ttl.Parent = top
 	local subt = Instance.new("TextLabel"); subt.Size = UDim2.new(0,100,0,13); subt.Position = UDim2.new(0,44,0,22); subt.BackgroundTransparency = 1; subt.Text = "Jailbreak"; subt.TextColor3 = C.textDim; subt.TextSize = 11; subt.Font = Enum.Font.Gotham; subt.TextXAlignment = Enum.TextXAlignment.Left; subt.Parent = top
-	local teamDot = Instance.new("Frame"); teamDot.Name = "teamDot"; teamDot.Size = UDim2.new(0,8,0,8); teamDot.Position = UDim2.new(0,150,0,26); teamDot.BackgroundColor3 = C.safe; teamDot.BorderSizePixel = 0; teamDot.Parent = top
+	local teamDot = Instance.new("Frame"); teamDot.Size = UDim2.new(0,8,0,8); teamDot.Position = UDim2.new(0,150,0,26); teamDot.BackgroundColor3 = C.safe; teamDot.BorderSizePixel = 0; teamDot.Parent = top
 	Instance.new("UICorner", teamDot).CornerRadius = UDim.new(1,0)
-	local teamLbl = Instance.new("TextLabel"); teamLbl.Name = "teamLbl"; teamLbl.Size = UDim2.new(0,70,0,13); teamLbl.Position = UDim2.new(0,162,0,22); teamLbl.BackgroundTransparency = 1; teamLbl.Text = "Ready"; teamLbl.TextColor3 = C.safe; teamLbl.TextSize = 10; teamLbl.Font = Enum.Font.GothamMedium; teamLbl.TextXAlignment = Enum.TextXAlignment.Left; teamLbl.Parent = top
+	local teamLbl = Instance.new("TextLabel"); teamLbl.Size = UDim2.new(0,70,0,13); teamLbl.Position = UDim2.new(0,162,0,22); teamLbl.BackgroundTransparency = 1; teamLbl.Text = "Ready"; teamLbl.TextColor3 = C.safe; teamLbl.TextSize = 10; teamLbl.Font = Enum.Font.GothamMedium; teamLbl.TextXAlignment = Enum.TextXAlignment.Left; teamLbl.Parent = top
 	local tagF = Instance.new("Frame"); tagF.Size = UDim2.new(0,130,0,20); tagF.Position = UDim2.new(0,240,0.5,-10); tagF.BackgroundTransparency = 1; tagF.Parent = top
 	local tl = Instance.new("UIListLayout"); tl.FillDirection = Enum.FillDirection.Horizontal; tl.Padding = UDim.new(0,5); tl.VerticalAlignment = Enum.VerticalAlignment.Center; tl.Parent = tagF
 	local function mkTag(txt,col,ord)
@@ -397,7 +541,7 @@ local function buildUI()
 		Instance.new("UICorner", f).CornerRadius = UDim.new(0,4)
 		local l = Instance.new("TextLabel"); l.Size = UDim2.new(1,0,1,0); l.BackgroundTransparency = 1; l.Text = txt; l.TextColor3 = col; l.TextSize = 9; l.Font = Enum.Font.GothamBold; l.Parent = f
 	end
-	mkTag("v1", C.accent, 1); mkTag("FREE", C.green, 2)
+	mkTag("v2", C.accent, 1); mkTag("FREE", C.green, 2)
 	local function mkWinBtn(txt,col,pos,cb)
 		local b = Instance.new("TextButton"); b.Size = UDim2.new(0,24,0,24); b.Position = pos; b.BackgroundColor3 = col; b.BackgroundTransparency = 0.85
 		b.Text = txt; b.TextColor3 = C.textDim; b.TextSize = 12; b.Font = Enum.Font.GothamBold; b.BorderSizePixel = 0; b.AutoButtonColor = false; b.Parent = top
@@ -422,11 +566,11 @@ local function buildUI()
 	local content = Instance.new("Frame"); content.Size = UDim2.new(1,-(SW+14),1,-(TH+10)); content.Position = UDim2.new(0,SW+7,0,TH+5); content.BackgroundTransparency = 1; content.ClipsDescendants = true; content.Parent = main
 	local pages,navBtns,activeTab = {},{},nil
 	local tabsList = {
+		{n="Auto Rob",i="💰",d="Farm money"},
 		{n="Teleport",i="🗺",d="Fast travel"},
 		{n="ESP",i="👁",d="Player overlays"},
 		{n="Aimbot",i="🎯",d="Target lock"},
 		{n="Movement",i="🏃",d="Fly & clip"},
-		{n="Vehicle",i="🚗",d="Car mods"},
 		{n="Misc",i="⚙",d="Utilities"},
 	}
 	for _,t in tabsList do
@@ -496,6 +640,34 @@ local function buildUI()
 		b.MouseEnter:Connect(function() tw(b,{BackgroundColor3=C.cardHover},TF) end)
 		b.MouseLeave:Connect(function() tw(b,{BackgroundColor3=col or C.card},TF) end)
 	end
+	-- AUTO ROB TAB
+	local ar = pages["Auto Rob"]
+	mkLabel(ar,"ROBBERIES",1)
+	mkToggle(ar,"Auto Bank",JBConfig.AutoBank_Enabled,function(v)
+		JBConfig.AutoBank_Enabled = v
+		if v then JBConfig.AutoJewelry_Enabled = false; autoBank()
+		else stopAutoRob() end
+	end,2)
+	mkToggle(ar,"Auto Jewelry",JBConfig.AutoJewelry_Enabled,function(v)
+		JBConfig.AutoJewelry_Enabled = v
+		if v then JBConfig.AutoBank_Enabled = false; autoJewelry()
+		else stopAutoRob() end
+	end,3)
+	mkDivider(ar,4); mkLabel(ar,"PICKPOCKET",5)
+	mkToggle(ar,"Auto Pickpocket",JBConfig.AutoPickpocket_Enabled,function(v)
+		JBConfig.AutoPickpocket_Enabled = v
+		if v then autoPickpocket() else stopPickpocket() end
+	end,6)
+	mkDivider(ar,7); mkLabel(ar,"REWARDS",8)
+	mkToggle(ar,"Auto Collect Reward",JBConfig.AutoReward_Enabled,function(v) JBConfig.AutoReward_Enabled = v end,9)
+	mkButton(ar,"💰  Collect Reward Now",C.accent,function() collectReward() end,10)
+	mkDivider(ar,11); mkLabel(ar,"SETTINGS",12)
+	mkCycle(ar,"TP Speed",{100,150,200,300,500},JBConfig.SmoothTP_Speed,function(v) JBConfig.SmoothTP_Speed = v end,13)
+	mkDivider(ar,14); mkLabel(ar,"QUICK TRAVEL",15)
+	mkButton(ar,"🏦  Go to Bank",C.card,function() teleportTo(CFrame.new(32, 18, 822)) end,16)
+	mkButton(ar,"💎  Go to Jewelry",C.card,function() teleportTo(CFrame.new(142, 18, 1365)) end,17)
+	mkButton(ar,"🏴  Go to Criminal Base",C.card,function() teleportTo(CRIMINAL_BASE) end,18)
+	-- TELEPORT TAB
 	local tpPage = pages["Teleport"]
 	mkLabel(tpPage,"ROBBERIES",1)
 	local ord = 2
@@ -513,6 +685,7 @@ local function buildUI()
 			ord += 1
 		end
 	end
+	-- ESP TAB
 	local ep = pages["ESP"]
 	mkLabel(ep,"PLAYER ESP",1)
 	mkToggle(ep,"ESP Enabled",JBConfig.ESP_Enabled,function(v) JBConfig.ESP_Enabled = v; if not v then for _,d in ESPCache do hideESP(d) end end end,2)
@@ -528,6 +701,7 @@ local function buildUI()
 	Instance.new("UICorner", teamKey).CornerRadius = UDim.new(0,7)
 	local keyTxt = Instance.new("TextLabel"); keyTxt.Size = UDim2.new(1,-16,1,-8); keyTxt.Position = UDim2.new(0,8,0,4); keyTxt.BackgroundTransparency = 1
 	keyTxt.Text = "🔵 Cop   🔴 Criminal   🟠 Prisoner"; keyTxt.TextColor3 = C.textDim; keyTxt.TextSize = 10; keyTxt.Font = Enum.Font.Gotham; keyTxt.TextWrapped = true; keyTxt.TextXAlignment = Enum.TextXAlignment.Left; keyTxt.Parent = teamKey
+	-- AIMBOT TAB
 	local ap = pages["Aimbot"]
 	mkLabel(ap,"MAIN",1)
 	mkToggle(ap,"Aimbot (hold RMB)",JBConfig.Aimbot_Enabled,function(v) JBConfig.Aimbot_Enabled = v end,2)
@@ -539,6 +713,7 @@ local function buildUI()
 	mkDivider(ap,10); mkLabel(ap,"TUNING",11)
 	mkCycle(ap,"FOV Radius",{60,80,100,120,150,200,300},JBConfig.Aimbot_FOV,function(v) JBConfig.Aimbot_FOV = v end,12)
 	mkCycle(ap,"Smoothness",{0,0.1,0.25,0.4,0.6,0.8},JBConfig.Aimbot_Smoothness,function(v) JBConfig.Aimbot_Smoothness = v end,13)
+	-- MOVEMENT TAB
 	local mp = pages["Movement"]
 	mkLabel(mp,"SPEED",1)
 	mkToggle(mp,"Speed Hack",JBConfig.SpeedEnabled,function(v) JBConfig.SpeedEnabled = v end,2)
@@ -551,32 +726,27 @@ local function buildUI()
 	mkCycle(mp,"Fly Speed",{40,60,80,120,200,300},JBConfig.FlySpeed,function(v) JBConfig.FlySpeed = v end,11)
 	mkDivider(mp,12); mkLabel(mp,"COLLISION",13)
 	mkToggle(mp,"NoClip",JBConfig.NoClipEnabled,function(v) JBConfig.NoClipEnabled = v; if v then startNoClip() else stopNoClip() end end,14)
-	local vp = pages["Vehicle"]
-	mkLabel(vp,"NITRO",1)
-	mkToggle(vp,"Infinite Nitro",JBConfig.InfNitro_Enabled,function(v) JBConfig.InfNitro_Enabled = v end,2)
-	mkDivider(vp,3); mkLabel(vp,"GARAGE",4)
-	mkButton(vp,"🚗  Teleport to Garage",C.card,function() teleportTo(CFrame.new(340, 18, 1610)) end,5)
-	mkDivider(vp,6); mkLabel(vp,"ACTIONS",7)
-	mkButton(vp,"💥  Eject from Vehicle",C.card,function() pcall(function() local hum = getMyHum(); if hum then hum.Sit = false end end) end,8)
+	-- MISC TAB
 	local misc = pages["Misc"]
 	mkLabel(misc,"VISUALS",1)
 	mkToggle(misc,"Fullbright",JBConfig.Fullbright_Enabled,function(v) JBConfig.Fullbright_Enabled = v; if v then enableFullbright() else disableFullbright() end end,2)
-	mkDivider(misc,3); mkLabel(misc,"ANTI-KICK",4)
-	mkToggle(misc,"Anti-AFK",JBConfig.AntiAFK_Enabled,function(v) JBConfig.AntiAFK_Enabled = v; if v then enableAntiAFK() else disableAntiAFK() end end,5)
-	mkDivider(misc,6); mkLabel(misc,"ROBBERY",7)
-	mkToggle(misc,"Auto Collect Reward",JBConfig.AutoReward_Enabled,function(v) JBConfig.AutoReward_Enabled = v end,8)
-	mkDivider(misc,9); mkLabel(misc,"CONTROLS",10)
+	mkDivider(misc,3); mkLabel(misc,"VEHICLE",4)
+	mkToggle(misc,"Infinite Nitro",JBConfig.InfNitro_Enabled,function(v) JBConfig.InfNitro_Enabled = v end,5)
+	mkButton(misc,"💥  Eject from Vehicle",C.card,function() pcall(function() local hum = getMyHum(); if hum then hum.Sit = false end end) end,6)
+	mkDivider(misc,7); mkLabel(misc,"ANTI-KICK",8)
+	mkToggle(misc,"Anti-AFK",JBConfig.AntiAFK_Enabled,function(v) JBConfig.AntiAFK_Enabled = v; if v then enableAntiAFK() else disableAntiAFK() end end,9)
+	mkDivider(misc,10); mkLabel(misc,"CONTROLS",11)
 	local function mkInfoRow(par,k,v,ord)
 		local r = Instance.new("Frame"); r.Size = UDim2.new(1,0,0,28); r.BackgroundColor3 = C.card; r.BorderSizePixel = 0; r.LayoutOrder = ord; r.Parent = par
 		Instance.new("UICorner", r).CornerRadius = UDim.new(0,6)
 		local kl = Instance.new("TextLabel"); kl.Size = UDim2.new(0.5,0,1,0); kl.Position = UDim2.new(0,14,0,0); kl.BackgroundTransparency = 1; kl.Text = k; kl.TextColor3 = C.textDim; kl.TextSize = 11; kl.Font = Enum.Font.Gotham; kl.TextXAlignment = Enum.TextXAlignment.Left; kl.Parent = r
 		local vl = Instance.new("TextLabel"); vl.Size = UDim2.new(0.45,0,1,0); vl.Position = UDim2.new(0.5,0,0,0); vl.BackgroundTransparency = 1; vl.Text = v; vl.TextColor3 = C.text; vl.TextSize = 11; vl.Font = Enum.Font.GothamMedium; vl.TextXAlignment = Enum.TextXAlignment.Right; vl.Parent = r
 	end
-	mkInfoRow(misc,"Toggle UI","RightCtrl",11)
-	mkInfoRow(misc,"Aimbot","Hold RMB",12)
-	mkInfoRow(misc,"Fly Controls","WASD + Space/Shift",13)
-	mkInfoRow(misc,"ESP Colors","Team-based auto",14)
-	switchTab("Teleport")
+	mkInfoRow(misc,"Toggle UI","RightCtrl",12)
+	mkInfoRow(misc,"Aimbot","Hold RMB",13)
+	mkInfoRow(misc,"Fly Controls","WASD + Space/Shift",14)
+	mkInfoRow(misc,"Smooth TP","Anti-cheat safe",15)
+	switchTab("Auto Rob")
 	task.spawn(function()
 		while task.wait(0.5) do
 			pcall(function()
@@ -594,11 +764,6 @@ RunService.RenderStepped:Connect(function()
 	pcall(updateAimbot)
 	pcall(applyCharacterMods)
 	pcall(updateNitro)
-end)
-task.spawn(function()
-	while task.wait(2) do
-		pcall(updateAutoReward)
-	end
 end)
 Players.PlayerRemoving:Connect(function(p)
 	if ESPCache[p] then
@@ -624,6 +789,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		end
 	end
 end)
-print("[TeekHub] Jailbreak v1 loaded")
-print("[TeekHub] Teleport | ESP | Aimbot | Movement | Vehicle | Misc")
-print("[TeekHub] RightCtrl to toggle UI")
+print("[TeekHub] Jailbreak v2 loaded")
+print("[TeekHub] Auto Rob | Teleport | ESP | Aimbot | Movement | Misc")
+print("[TeekHub] Smooth TP enabled — anti-cheat safe movement")
