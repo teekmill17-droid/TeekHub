@@ -7,6 +7,38 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LP = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local VIM = game:GetService("VirtualInputManager")
+local CollectionService = game:GetService("CollectionService")
+local JBRemote = nil
+local JBRemap = nil
+local function extractRemote()
+	for _, v in ReplicatedStorage:GetChildren() do
+		if v:IsA("RemoteEvent") and v.Name:find("-") and #v.Name > 20 then
+			JBRemote = v
+			break
+		end
+	end
+	if not JBRemote then return false end
+	for _, v in getgc(true) do
+		if typeof(v) == "table" and rawget(v, "k0w5mhnz") then
+			JBRemap = v
+			break
+		end
+	end
+	if not JBRemap then return false end
+	return true
+end
+local remoteReady = extractRemote()
+local function fireRemote(eventName, ...)
+	if not JBRemote or not JBRemap then
+		remoteReady = extractRemote()
+		if not remoteReady then return false end
+	end
+	local mapped = JBRemap[eventName] or eventName
+	local args = {...}
+	pcall(function() JBRemote:FireServer(mapped, unpack(args)) end)
+	return true
+end
+if remoteReady then print("[TeekHub] Remote system extracted") else warn("[TeekHub] Remote extraction failed — some features unavailable") end
 local JBConfig = {
 	ESP_Enabled = false,
 	ESP_ShowBoxes = true,
@@ -30,7 +62,7 @@ local JBConfig = {
 	SpeedEnabled = false,
 	SpeedValue = 32,
 	JumpEnabled = false,
-	JumpValue = 80,
+	JumpValue = 60,
 	Fullbright_Enabled = false,
 	InfNitro_Enabled = false,
 	AutoReward_Enabled = false,
@@ -54,7 +86,7 @@ local SPOTS = {
 	{name = "Crater Garage", pos = CFrame.new(-390, 18, 1720)},
 	{name = "Gun Shop 1", pos = CFrame.new(414, 18, 1526)},
 	{name = "Gun Shop 2", pos = CFrame.new(-282, 18, 1685)},
-	{name = "Criminal Base", pos = CFrame.new(-222, 18, 1590)},
+	{name = "Criminal Base", pos = CFrame.new(2127.9, 19.4, -2636.3)},
 	{name = "Volcano Base", pos = CFrame.new(1720, 52, -1580)},
 	{name = "Prison Yard", pos = CFrame.new(-1310, 18, -1760)},
 	{name = "Police HQ", pos = CFrame.new(-1180, 18, -1580)},
@@ -66,21 +98,28 @@ local SPOTS = {
 	{name = "1M Dealership", pos = CFrame.new(-905, 18, -395)},
 }
 local BANK_WAYPOINTS = {
-	CFrame.new(32, 18, 822),
-	CFrame.new(28, 18, 782),
-	CFrame.new(18, 0, 770),
-	CFrame.new(18, -8, 760),
-	CFrame.new(18, -8, 740),
+	CFrame.new(30.8, 18.6, 786.0),
+	CFrame.new(29.0, 18.5, 822.9),
+	CFrame.new(41.8, 18.5, 894.7),
+	CFrame.new(45.4, 18.6, 916.1),
+	CFrame.new(54.0, 66.6, 905.7),
+	CFrame.new(57.4, 66.5, 923.1),
+	CFrame.new(42.7, 54.6, 836.7),
+	CFrame.new(40.3, 54.5, 822.6),
+	CFrame.new(58.6, 115.3, 838.5),
+	CFrame.new(66.3, 115.3, 890.5),
 }
 local JEWELRY_WAYPOINTS = {
-	CFrame.new(142, 18, 1365),
-	CFrame.new(130, 18, 1355),
-	CFrame.new(130, 22, 1340),
-	CFrame.new(130, 30, 1340),
-	CFrame.new(130, 40, 1340),
-	CFrame.new(130, 50, 1340),
+	CFrame.new(90.2, 18.3, 1308.0),
+	CFrame.new(107.8, 18.7, 1296.3),
+	CFrame.new(126.3, 18.5, 1295.9),
+	CFrame.new(135.5, 18.5, 1295.7),
+	CFrame.new(140.8, 18.5, 1293.4),
+	CFrame.new(129.0, 18.5, 1301.8),
+	CFrame.new(140.8, 18.5, 1301.8),
+	CFrame.new(128.5, 45.6, 1335.5),
 }
-local CRIMINAL_BASE = CFrame.new(-222, 18, 1590)
+local CRIMINAL_BASE = CFrame.new(2127.9, 19.4, -2636.3)
 local TEAM_COLORS = {
 	Cop = Color3.fromRGB(80, 140, 255),
 	Criminal = Color3.fromRGB(255, 80, 60),
@@ -130,45 +169,106 @@ local function predictPosition(targetPart, fromPosition)
 	local travelTime = distance / 1000
 	return targetPart.Position + (velocity * travelTime)
 end
-local function setNoclipChar(enabled)
+local PS = game:GetService("PhysicsService")
+local NOCLIP_GROUP = "TeekNoClip"
+local noclipRegistered = false
+local function ensureNoclipGroup()
+	if noclipRegistered then return end
+	pcall(function() PS:RegisterCollisionGroup(NOCLIP_GROUP) end)
+	pcall(function() PS:CollisionGroupSetCollidable(NOCLIP_GROUP, "Default", false) end)
+	noclipRegistered = true
+end
+local originalCollisionGroups = {}
+local function enableNoclipChar()
+	ensureNoclipGroup()
 	pcall(function()
 		local char = LP.Character; if not char then return end
 		for _, part in char:GetDescendants() do
-			if part:IsA("BasePart") then part.CanCollide = not enabled end
+			if part:IsA("BasePart") then
+				if not originalCollisionGroups[part] then
+					originalCollisionGroups[part] = part.CollisionGroup
+				end
+				part.CollisionGroup = NOCLIP_GROUP
+			end
 		end
 	end)
 end
-local function smoothTeleport(targetCF)
+local function disableNoclipChar()
+	pcall(function()
+		local char = LP.Character; if not char then return end
+		for _, part in char:GetDescendants() do
+			if part:IsA("BasePart") and originalCollisionGroups[part] then
+				part.CollisionGroup = originalCollisionGroups[part]
+			end
+		end
+		originalCollisionGroups = {}
+	end)
+end
+local CRUISE_ALT = 350
+local autoFlyConn = nil
+local autoFlyCancel = false
+local function stopAutoFly()
+	autoFlyCancel = true
+	if autoFlyConn then autoFlyConn:Disconnect(); autoFlyConn = nil end
+	pcall(function() local h = getMyHum(); if h then h.PlatformStand = false end end)
+end
+local function flyToPoint(target, speed)
 	local root = getMyRoot()
-	if not root then return end
-	local startPos = root.Position
-	local endPos = typeof(targetCF) == "CFrame" and targetCF.Position or targetCF
-	local dist = (endPos - startPos).Magnitude
-	if dist < 5 then root.CFrame = typeof(targetCF) == "CFrame" and targetCF or CFrame.new(targetCF); return end
-	local speed = JBConfig.SmoothTP_Speed
-	local waitTime = 0.06
-	local stepSize = speed * waitTime
-	local steps = math.ceil(dist / stepSize)
-	steps = math.min(steps, 2000)
-	for i = 1, steps do
-		root = getMyRoot()
-		if not root or not root.Parent then return end
-		local alpha = i / steps
-		local newPos = startPos:Lerp(endPos, alpha)
-		root.CFrame = CFrame.new(newPos)
-		setNoclipChar(true)
+	if not root then return false end
+	local dist = (target - root.Position).Magnitude
+	if dist < 6 then root.CFrame = CFrame.new(target); return true end
+	local arrived = false
+	autoFlyCancel = false
+	if autoFlyConn then autoFlyConn:Disconnect() end
+	autoFlyConn = RunService.RenderStepped:Connect(function(dt)
+		if arrived or autoFlyCancel then return end
+		local r = getMyRoot()
+		if not r then return end
+		local diff = target - r.Position
+		local d = diff.Magnitude
+		if d < 6 then
+			r.CFrame = CFrame.new(target)
+			arrived = true
+			return
+		end
+		local step = math.min(speed * dt, d)
+		r.CFrame = r.CFrame + (diff.Unit * step)
 		pcall(function()
-			root.Velocity = Vector3.zero
-			root.AssemblyLinearVelocity = Vector3.zero
+			r.Velocity = Vector3.zero
+			r.AssemblyLinearVelocity = Vector3.zero
 		end)
-		RunService.Heartbeat:Wait()
-		task.wait(waitTime)
+		pcall(function() local h = getMyHum(); if h then h.PlatformStand = true end end)
+	end)
+	local timeout = (dist / speed) + 20
+	local start = tick()
+	while not arrived and not autoFlyCancel and (tick() - start) < timeout do
+		task.wait(0.1)
 	end
-	root = getMyRoot()
-	if root then root.CFrame = typeof(targetCF) == "CFrame" and targetCF or CFrame.new(targetCF) end
+	if autoFlyConn then autoFlyConn:Disconnect(); autoFlyConn = nil end
+	return arrived and not autoFlyCancel
+end
+local function autoFlyTo(targetCF, speed)
+	local target = typeof(targetCF) == "CFrame" and targetCF.Position or targetCF
+	speed = speed or JBConfig.SmoothTP_Speed
+	local root = getMyRoot()
+	if not root then return false end
+	local dist = (target - root.Position).Magnitude
+	if dist < 15 then
+		return flyToPoint(target, speed)
+	end
+	local myPos = root.Position
+	local riseTarget = Vector3.new(myPos.X, CRUISE_ALT, myPos.Z)
+	if not flyToPoint(riseTarget, speed * 1.2) then return false end
+	if autoFlyCancel then return false end
+	local cruiseTarget = Vector3.new(target.X, CRUISE_ALT, target.Z)
+	if not flyToPoint(cruiseTarget, speed) then return false end
+	if autoFlyCancel then return false end
+	if not flyToPoint(target, speed * 0.8) then return false end
+	pcall(function() local h = getMyHum(); if h then h.PlatformStand = false end end)
+	return true
 end
 local function teleportTo(cf)
-	smoothTeleport(cf)
+	autoFlyTo(cf)
 end
 local function collectReward()
 	pcall(function()
@@ -194,36 +294,49 @@ local function findNearestCop()
 	return closest
 end
 local autoRobActive = false
+local autoRobStatus = "Idle"
 local function autoBank()
 	if autoRobActive then return end
 	autoRobActive = true
 	task.spawn(function()
 		while JBConfig.AutoBank_Enabled and autoRobActive do
 			pcall(function()
-				for _, wp in BANK_WAYPOINTS do
-					if not JBConfig.AutoBank_Enabled then break end
-					smoothTeleport(wp)
-					task.wait(1)
+				autoRobStatus = "Flying to Bank"
+				if not autoRobActive then return end
+				autoFlyTo(BANK_WAYPOINTS[1], JBConfig.SmoothTP_Speed)
+				enableNoclipChar()
+				for i = 2, #BANK_WAYPOINTS do
+					if not JBConfig.AutoBank_Enabled or not autoRobActive then return end
+					autoRobStatus = "Bank stage " .. i-1
+					flyToPoint(BANK_WAYPOINTS[i].Position or BANK_WAYPOINTS[i], JBConfig.SmoothTP_Speed * 0.6)
+					task.wait(0.5)
 				end
-				if JBConfig.AutoBank_Enabled then
-					task.wait(15)
-					smoothTeleport(CRIMINAL_BASE)
-					task.wait(3)
-					collectReward()
-					task.wait(5)
-				end
+				if not JBConfig.AutoBank_Enabled or not autoRobActive then return end
+				autoRobStatus = "Collecting loot"
+				task.wait(20)
+				disableNoclipChar()
+				if not JBConfig.AutoBank_Enabled or not autoRobActive then return end
+				autoRobStatus = "Flying to base"
+				autoFlyTo(CRIMINAL_BASE, JBConfig.SmoothTP_Speed)
+				task.wait(3)
+				autoRobStatus = "Collecting reward"
+				collectReward()
+				task.wait(2)
+				collectReward()
 			end)
-			if JBConfig.AutoBank_Enabled then
-				task.wait(120)
+			if JBConfig.AutoBank_Enabled and autoRobActive then
+				autoRobStatus = "Cooldown (2min)"
+				local cd = 120
+				while cd > 0 and JBConfig.AutoBank_Enabled and autoRobActive do
+					autoRobStatus = "Cooldown (" .. cd .. "s)"
+					task.wait(5)
+					cd = cd - 5
+				end
 			end
 		end
 		autoRobActive = false
+		autoRobStatus = "Idle"
 	end)
-end
-local function stopAutoRob()
-	autoRobActive = false
-	JBConfig.AutoBank_Enabled = false
-	JBConfig.AutoJewelry_Enabled = false
 end
 local function autoJewelry()
 	if autoRobActive then return end
@@ -231,49 +344,82 @@ local function autoJewelry()
 	task.spawn(function()
 		while JBConfig.AutoJewelry_Enabled and autoRobActive do
 			pcall(function()
-				for _, wp in JEWELRY_WAYPOINTS do
-					if not JBConfig.AutoJewelry_Enabled then break end
-					smoothTeleport(wp)
-					task.wait(2)
-				end
-				if JBConfig.AutoJewelry_Enabled then
-					task.wait(10)
-					smoothTeleport(CRIMINAL_BASE)
-					task.wait(3)
-					collectReward()
+				autoRobStatus = "Grabbing jewels"
+				local jewels = CollectionService:GetTagged("RobberyJewelryJewel")
+				if #jewels == 0 then
+					autoRobStatus = "No jewels found"
 					task.wait(5)
+					return
 				end
+				for _, jewel in jewels do
+					if not JBConfig.AutoJewelry_Enabled or not autoRobActive then return end
+					if jewel:GetAttribute("LaserButton") then
+						autoRobStatus = "Disabling lasers"
+						fireRemote("c6th381s", "LaserButton")
+					else
+						autoRobStatus = "Grabbing " .. jewel.Name
+						fireRemote("c6th381s", jewel.Name)
+					end
+					task.wait(0.3)
+				end
+				if not JBConfig.AutoJewelry_Enabled or not autoRobActive then return end
+				autoRobStatus = "Collecting reward"
+				task.wait(3)
+				collectReward()
+				task.wait(2)
+				collectReward()
 			end)
-			if JBConfig.AutoJewelry_Enabled then
-				task.wait(120)
+			if JBConfig.AutoJewelry_Enabled and autoRobActive then
+				autoRobStatus = "Cooldown (2min)"
+				local cd = 120
+				while cd > 0 and JBConfig.AutoJewelry_Enabled and autoRobActive do
+					autoRobStatus = "Cooldown (" .. cd .. "s)"
+					task.wait(5)
+					cd = cd - 5
+				end
 			end
 		end
 		autoRobActive = false
+		autoRobStatus = "Idle"
 	end)
 end
+local function stopAutoRob()
+	autoRobActive = false
+	autoFlyCancel = true
+	JBConfig.AutoBank_Enabled = false
+	JBConfig.AutoJewelry_Enabled = false
+	stopAutoFly()
+	disableNoclipChar()
+	autoRobStatus = "Idle"
+end
 local pickpocketActive = false
+local function firePickpocket(copName)
+	return fireRemote("k0w5mhnz", copName)
+end
+local function getAllCops()
+	local cops = {}
+	for _, player in Players:GetPlayers() do
+		if player == LP then continue end
+		if getPlayerTeam(player) == "Cop" then
+			table.insert(cops, player)
+		end
+	end
+	return cops
+end
 local function autoPickpocket()
 	if pickpocketActive then return end
 	pickpocketActive = true
 	task.spawn(function()
 		while JBConfig.AutoPickpocket_Enabled and pickpocketActive do
 			pcall(function()
-				local cop = findNearestCop()
-				if not cop then task.wait(2); return end
-				local char = cop.Character
-				local root = char and char:FindFirstChild("HumanoidRootPart")
-				if not root then task.wait(1); return end
-				local behindCF = root.CFrame * CFrame.new(0, 0, 3)
-				smoothTeleport(behindCF)
-				task.wait(0.3)
-				pcall(function()
-					VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-				end)
-				task.wait(1.5)
-				pcall(function()
-					VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-				end)
-				task.wait(1)
+				local cops = getAllCops()
+				if #cops == 0 then task.wait(2); return end
+				for _, cop in cops do
+					if not JBConfig.AutoPickpocket_Enabled or not pickpocketActive then return end
+					firePickpocket(cop.Name)
+					task.wait(0.5)
+				end
+				task.wait(3)
 			end)
 		end
 		pickpocketActive = false
@@ -432,13 +578,15 @@ local function stopFly()
 end
 local NoClipConnection = nil
 local function startNoClip()
+	enableNoclipChar()
 	NoClipConnection = RunService.Stepped:Connect(function()
 		if not JBConfig.NoClipEnabled then return end
-		setNoclipChar(true)
+		enableNoclipChar()
 	end)
 end
 local function stopNoClip()
 	if NoClipConnection then NoClipConnection:Disconnect(); NoClipConnection = nil end
+	disableNoclipChar()
 end
 local function applyCharacterMods()
 	pcall(function()
@@ -543,7 +691,7 @@ local function buildUI()
 		Instance.new("UICorner", f).CornerRadius = UDim.new(0,4)
 		local l = Instance.new("TextLabel"); l.Size = UDim2.new(1,0,1,0); l.BackgroundTransparency = 1; l.Text = txt; l.TextColor3 = col; l.TextSize = 9; l.Font = Enum.Font.GothamBold; l.Parent = f
 	end
-	mkTag("v2", C.accent, 1); mkTag("FREE", C.green, 2)
+	mkTag("v3", C.accent, 1); mkTag("FREE", C.green, 2)
 	local function mkWinBtn(txt,col,pos,cb)
 		local b = Instance.new("TextButton"); b.Size = UDim2.new(0,24,0,24); b.Position = pos; b.BackgroundColor3 = col; b.BackgroundTransparency = 0.85
 		b.Text = txt; b.TextColor3 = C.textDim; b.TextSize = 12; b.Font = Enum.Font.GothamBold; b.BorderSizePixel = 0; b.AutoButtonColor = false; b.Parent = top
@@ -644,6 +792,12 @@ local function buildUI()
 	end
 	-- AUTO ROB TAB
 	local ar = pages["Auto Rob"]
+	local statusFrame = Instance.new("Frame"); statusFrame.Size = UDim2.new(1,0,0,40); statusFrame.BackgroundColor3 = C.bg2; statusFrame.BorderSizePixel = 0; statusFrame.LayoutOrder = 0; statusFrame.Parent = ar
+	Instance.new("UICorner", statusFrame).CornerRadius = UDim.new(0,7)
+	local statusDot = Instance.new("Frame"); statusDot.Size = UDim2.new(0,10,0,10); statusDot.Position = UDim2.new(0,12,0.5,-5); statusDot.BackgroundColor3 = C.textMuted; statusDot.BorderSizePixel = 0; statusDot.Parent = statusFrame
+	Instance.new("UICorner", statusDot).CornerRadius = UDim.new(1,0)
+	local statusTitle = Instance.new("TextLabel"); statusTitle.Size = UDim2.new(0,50,0,14); statusTitle.Position = UDim2.new(0,28,0,4); statusTitle.BackgroundTransparency = 1; statusTitle.Text = "STATUS"; statusTitle.TextColor3 = C.textMuted; statusTitle.TextSize = 9; statusTitle.Font = Enum.Font.GothamBold; statusTitle.TextXAlignment = Enum.TextXAlignment.Left; statusTitle.Parent = statusFrame
+	local statusLbl = Instance.new("TextLabel"); statusLbl.Size = UDim2.new(1,-34,0,14); statusLbl.Position = UDim2.new(0,28,0,19); statusLbl.BackgroundTransparency = 1; statusLbl.Text = "Idle"; statusLbl.TextColor3 = C.textDim; statusLbl.TextSize = 11; statusLbl.Font = Enum.Font.GothamMedium; statusLbl.TextXAlignment = Enum.TextXAlignment.Left; statusLbl.Parent = statusFrame
 	mkLabel(ar,"ROBBERIES",1)
 	mkToggle(ar,"Auto Bank",JBConfig.AutoBank_Enabled,function(v)
 		JBConfig.AutoBank_Enabled = v
@@ -663,12 +817,29 @@ local function buildUI()
 	mkDivider(ar,7); mkLabel(ar,"REWARDS",8)
 	mkToggle(ar,"Auto Collect Reward",JBConfig.AutoReward_Enabled,function(v) JBConfig.AutoReward_Enabled = v end,9)
 	mkButton(ar,"💰  Collect Reward Now",C.accent,function() collectReward() end,10)
-	mkDivider(ar,11); mkLabel(ar,"SETTINGS",12)
-	mkCycle(ar,"TP Speed",{30,50,75,100,150},JBConfig.SmoothTP_Speed,function(v) JBConfig.SmoothTP_Speed = v end,13)
-	mkDivider(ar,14); mkLabel(ar,"QUICK TRAVEL",15)
-	mkButton(ar,"🏦  Go to Bank",C.card,function() teleportTo(CFrame.new(32, 18, 822)) end,16)
-	mkButton(ar,"💎  Go to Jewelry",C.card,function() teleportTo(CFrame.new(142, 18, 1365)) end,17)
-	mkButton(ar,"🏴  Go to Criminal Base",C.card,function() teleportTo(CRIMINAL_BASE) end,18)
+	mkDivider(ar,11); mkLabel(ar,"REMOTE ACTIONS",12)
+	mkButton(ar,"💎  Grab All Jewels Now",C.accent,function()
+		local jewels = CollectionService:GetTagged("RobberyJewelryJewel")
+		for _, j in jewels do
+			if j:GetAttribute("LaserButton") then
+				fireRemote("c6th381s", "LaserButton")
+			else
+				fireRemote("c6th381s", j.Name)
+			end
+			task.wait(0.2)
+		end
+	end,13)
+	mkButton(ar,"🔓  Disable Lasers",C.card,function() fireRemote("c6th381s", "LaserButton") end,14)
+	mkDivider(ar,15); mkLabel(ar,"SETTINGS",16)
+	mkCycle(ar,"TP Speed",{30,50,75,100,150},JBConfig.SmoothTP_Speed,function(v) JBConfig.SmoothTP_Speed = v end,17)
+	mkDivider(ar,18); mkLabel(ar,"QUICK TRAVEL",19)
+	mkButton(ar,"🏦  Go to Bank",C.card,function() teleportTo(CFrame.new(32, 18, 822)) end,20)
+	mkButton(ar,"💎  Go to Jewelry",C.card,function() teleportTo(CFrame.new(142, 18, 1365)) end,21)
+	mkButton(ar,"🏴  Go to Criminal Base",C.card,function() teleportTo(CRIMINAL_BASE) end,22)
+	local remoteInfo = Instance.new("Frame"); remoteInfo.Size = UDim2.new(1,0,0,30); remoteInfo.BackgroundColor3 = C.bg2; remoteInfo.BorderSizePixel = 0; remoteInfo.LayoutOrder = 23; remoteInfo.Parent = ar
+	Instance.new("UICorner", remoteInfo).CornerRadius = UDim.new(0,6)
+	local riTxt = Instance.new("TextLabel"); riTxt.Size = UDim2.new(1,-16,1,0); riTxt.Position = UDim2.new(0,8,0,0); riTxt.BackgroundTransparency = 1
+	riTxt.Text = remoteReady and "🟢 Remote system active" or "🔴 Remote extraction failed"; riTxt.TextColor3 = remoteReady and C.green or C.red; riTxt.TextSize = 10; riTxt.Font = Enum.Font.GothamMedium; riTxt.TextXAlignment = Enum.TextXAlignment.Left; riTxt.Parent = remoteInfo
 	-- TELEPORT TAB
 	local tpPage = pages["Teleport"]
 	mkLabel(tpPage,"ROBBERIES",1)
@@ -722,7 +893,7 @@ local function buildUI()
 	mkCycle(mp,"Walk Speed",{26,32,40,50,75,100},JBConfig.SpeedValue,function(v) JBConfig.SpeedValue = v end,3)
 	mkDivider(mp,4); mkLabel(mp,"JUMP",5)
 	mkToggle(mp,"Jump Hack",JBConfig.JumpEnabled,function(v) JBConfig.JumpEnabled = v end,6)
-	mkCycle(mp,"Jump Power",{50,80,100,150,200},JBConfig.JumpValue,function(v) JBConfig.JumpValue = v end,7)
+	mkCycle(mp,"Jump Power",{50,55,60},JBConfig.JumpValue,function(v) JBConfig.JumpValue = v end,7)
 	mkDivider(mp,8); mkLabel(mp,"FLIGHT",9)
 	mkToggle(mp,"Fly (CFrame)",JBConfig.FlyEnabled,function(v) JBConfig.FlyEnabled = v; if v then startFly() else stopFly() end end,10)
 	mkCycle(mp,"Fly Speed",{40,60,80,120,200,300},JBConfig.FlySpeed,function(v) JBConfig.FlySpeed = v end,11)
@@ -747,9 +918,10 @@ local function buildUI()
 	mkInfoRow(misc,"Toggle UI","RightCtrl",12)
 	mkInfoRow(misc,"Aimbot","Hold RMB",13)
 	mkInfoRow(misc,"Fly Controls","WASD + Space/Shift",14)
-	mkInfoRow(misc,"Smooth TP","Anti-cheat safe",15)
-	mkDivider(misc,16); mkLabel(misc,"SCRIPT",17)
-	mkButton(misc,"🗑  Unload TeekHub",C.red,function() unloadHub() end,18)
+	mkInfoRow(misc,"Remote System","Extracted",15)
+	mkInfoRow(misc,"Jump Max","60 (AC limit)",16)
+	mkDivider(misc,17); mkLabel(misc,"SCRIPT",18)
+	mkButton(misc,"🗑  Unload TeekHub",C.red,function() unloadHub() end,19)
 	switchTab("Auto Rob")
 local hubAlive = true
 	task.spawn(function()
@@ -758,6 +930,18 @@ local hubAlive = true
 				local team = getPlayerTeam(LP)
 				local col = TEAM_COLORS[team] or C.safe
 				teamDot.BackgroundColor3 = col; teamLbl.Text = team; teamLbl.TextColor3 = col
+			end)
+			pcall(function()
+				local displayStatus = autoRobStatus
+				if pickpocketActive then displayStatus = "Pickpocketing cops..." end
+				statusLbl.Text = displayStatus
+				if autoRobActive then
+					statusDot.BackgroundColor3 = C.green; statusLbl.TextColor3 = C.green
+				elseif pickpocketActive then
+					statusDot.BackgroundColor3 = C.warning; statusLbl.TextColor3 = C.warning
+				else
+					statusDot.BackgroundColor3 = C.textMuted; statusLbl.TextColor3 = C.textDim
+				end
 			end)
 		end
 	end)
@@ -780,7 +964,13 @@ end)
 Connections[#Connections+1] = LP.CharacterAdded:Connect(function()
 	task.wait(0.5)
 	applyCharacterMods()
+	if JBConfig.NoClipEnabled then enableNoclipChar() end
 	if JBConfig.FlyEnabled then stopFly(); task.wait(0.2); startFly() end
+end)
+task.spawn(function()
+	while task.wait(3) do
+		if JBConfig.AutoReward_Enabled then pcall(collectReward) end
+	end
 end)
 Connections[#Connections+1] = UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
@@ -798,6 +988,7 @@ end)
 function unloadHub()
 	stopAutoRob()
 	stopPickpocket()
+	stopAutoFly()
 	stopFly()
 	stopNoClip()
 	disableAntiAFK()
@@ -810,6 +1001,7 @@ function unloadHub()
 	pcall(function() gui:Destroy() end)
 	print("[TeekHub] Unloaded — all features disabled")
 end
-print("[TeekHub] Jailbreak v2 loaded")
+print("[TeekHub] Jailbreak v3 loaded")
 print("[TeekHub] Auto Rob | Teleport | ESP | Aimbot | Movement | Misc")
-print("[TeekHub] Smooth TP enabled — anti-cheat safe movement")
+print("[TeekHub] Remote system: " .. (remoteReady and "ACTIVE" or "FAILED"))
+print("[TeekHub] RightCtrl to toggle UI")
