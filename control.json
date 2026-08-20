@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "keyRequired": false,
+  "minVersion": "6.0.0",
+  "message": null,
+  "messageKind": "info",
+  "_comment": [
+    "Operational control for every TeekHub loader in the wild. Edit and push;",
+    "the loader reads this before anything else, with a cache buster, so a",
+    "change reaches users on their next execute.",
+    "",
+    "enabled      false kills every copy of the hub immediately.",
+    "keyRequired  false is keyless. Flip to true when the key gate goes live",
+    "             - no user has to change their loadstring.",
+    "minVersion   loaders older than this refuse to run and tell the user to",
+    "             fetch a new loadstring.",
+    "message      shown on start. Use it for outages and announcements.",
+    "messageKind  info | warn"
+  ]
+}
