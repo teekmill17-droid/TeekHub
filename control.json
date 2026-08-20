@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "keyRequired": false,
-  "minVersion": "6.0.0",
+  "minVersion": "6.2.0",
   "message": null,
   "messageKind": "info",
   "_comment": [
