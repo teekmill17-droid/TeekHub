@@ -12,9 +12,13 @@
     "enabled      false kills every copy of the hub immediately.",
     "keyRequired  false is keyless. Flip to true when the key gate goes live",
     "             - no user has to change their loadstring.",
+    "autoExecute  false means the hub does NOT relaunch itself after a teleport.",
+    "             Flip to true for unattended farming; it re-arms once per",
+    "             session and chains across round changes.",
     "minVersion   loaders older than this refuse to run and tell the user to",
     "             fetch a new loadstring.",
     "message      shown on start. Use it for outages and announcements.",
     "messageKind  info | warn"
-  ]
+  ],
+  "autoExecute": false
 }
