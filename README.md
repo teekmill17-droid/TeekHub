@@ -35,8 +35,10 @@ tracers, off-screen arrows, distance fade, visibility colouring and a radar.
 It renders through its own GUI pipeline rather than the Drawing API, because
 several popular executors accept Drawing calls and render nothing at all.
 
-**Config profiles.** Named profiles, autosave, and share codes — hand someone a
-short string and they get your exact setup.
+**Config profiles.** Save a named profile and it appears in a dropdown you pick
+from — no retyping a name and hoping you spelled it the same way. Set one to
+load on start if you want it back automatically. Share codes turn a setup into
+a short string you can paste to someone else.
 
 **A status panel that tells you the truth.** Every dependency the script has is
 health-checked at runtime. When a game updates and something moves, the panel
@@ -54,14 +56,22 @@ source rather than scraped off a label.
 
 ## Interface
 
-Dark, purple, animated, with a Rinnegan boot sequence. Tabs are searchable, the
-window is resizable, and it remembers where you left it.
+Dark, purple, animated, opening on a Rinnegan that fills as it loads. Tabs are
+searchable, and there is a UI Scale slider on the Interface tab if the window
+is too large or too small for your screen.
 
 ---
 
 ## Notes
 
 - Requires an executor with `loadstring` and `game:HttpGet`.
+- **Settings do not persist unless you save them.** Save a profile on the Config
+  tab, and optionally set it to load on start. There is also a "Keep Settings
+  Between Sessions" toggle there if you would rather it saved continuously.
+- **The hub does not relaunch itself after a teleport.** Run the loadstring
+  again when a game moves you between places. This is deliberate — a hub that
+  re-injects itself into every session you join is worse than one you start
+  when you want it.
 - The hub reads a small control file on start, so an outage or a breaking game
   update can be announced to everyone at once.
 - Everything here is provided as-is, for use at your own risk.
