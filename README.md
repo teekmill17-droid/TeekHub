@@ -22,6 +22,7 @@ New games and fixes reach you on your next execute. There is nothing to update.
 | Jailbreak | Vehicle tools, ESP, auto-rob |
 | Anime Battle Arena | Combat helpers, ESP |
 | All Star Tower Defense | Auto battle, 3x speed lock, summon viewer *(beta)* |
+| RH2 The Journey | Auto green shot meter, keycap overlay, accuracy stats |
 
 Running something unsupported? The hub prints the place and universe ID on
 start — post those in Discord and it becomes a request.
@@ -78,4 +79,4 @@ is too large or too small for your screen.
 
 ## Links
 
-Discord — *(invite goes here)*
+Discord — https://discord.gg/bVfh78hkc
