@@ -18,7 +18,18 @@
     "minVersion   loaders older than this refuse to run and tell the user to",
     "             fetch a new loadstring.",
     "message      shown on start. Use it for outages and announcements.",
-    "messageKind  info | warn"
+    "messageKind  info | warn",
+    "notices      per-game warnings keyed by place or universe id. Set",
+    "             confirm true to make the user choose before it loads;",
+    "             walking away or a failed dialog means it does NOT load."
   ],
-  "autoExecute": false
+  "autoExecute": false,
+  "notices": {
+    "10563114921": {
+      "title": "Steal an Egg \u2014 anti-cheat",
+      "text": "This game runs a server-side anti-cheat that kicks with \"removed for cheating\". It has kicked a test account several times and the trigger has not been identified yet, so running the script here can get you booted and may risk the account. Everything else in the hub is unaffected.",
+      "confirmText": "I understand, load it",
+      "confirm": true
+    }
+  }
 }
