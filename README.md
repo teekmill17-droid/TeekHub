@@ -23,6 +23,8 @@ New games and fixes reach you on your next execute. There is nothing to update.
 | Anime Battle Arena | Combat helpers, ESP |
 | All Star Tower Defense | Auto battle, 3x speed lock, summon viewer *(beta)* |
 | RH2 The Journey | Auto green shot meter, keycap overlay, accuracy stats |
+| My Animal Farm | Auto roll/buy/place/hatch, fills every slot, trait feeding |
+| Steal an Egg | Auto steal by area, size and earning rate, auto place/hatch, treadmill |
 
 Running something unsupported? The hub prints the place and universe ID on
 start — post those in Discord and it becomes a request.
