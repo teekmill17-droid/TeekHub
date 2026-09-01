@@ -1,4 +1,9 @@
 {
- "updated": 0,
- "games": {}
+ "updated": 1787844731,
+ "games": {
+  "10548784271": {
+   "script": "Games/TimberPets.lua",
+   "name": "My Timber Pets"
+  }
+ }
 }
