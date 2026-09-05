@@ -157,6 +157,37 @@ task.spawn(function()
     end
 end)
 
+-- The game's own grade for each shot. This is the half that says whether the
+-- release was actually good, rather than just where it landed.
+do
+    local fb = lp:FindFirstChild("PlayerGui")
+    fb = fb and fb:FindFirstChild("Feedback.Ui")
+    fb = fb and fb:FindFirstChild("Frame")
+    fb = fb and fb:FindFirstChild("Background")
+    fb = fb and fb:FindFirstChild("TimingFeedBack")
+    if fb then
+        track(fb:GetPropertyChangedSignal("Text"):Connect(function()
+            local txt = tostring(fb.Text or "")
+            if txt:gsub("%s", "") ~= "" then log("* VERDICT: %s", txt) end
+        end))
+    else
+        log("! no TimingFeedBack label - verdicts unavailable")
+    end
+end
+
+-- Whether the hub drove the shot or the player tapped the game's own button.
+-- Without this a manual test reads exactly like a solver result, which has
+-- already cost one round of wrong conclusions.
+task.spawn(function()
+    local UIS = game:GetService("UserInputService")
+    local was = false
+    while sg.Parent do
+        local down = UIS:IsKeyDown(Enum.KeyCode.E)
+        if down ~= was then log("  E %s", down and "DOWN (script)" or "up") ; was = down end
+        task.wait(0.03)
+    end
+end)
+
 getgenv().TeekDiagStop = function()
     for _, c in ipairs(CONNS) do pcall(function() c:Disconnect() end) end
     pcall(function() sg:Destroy() end)
