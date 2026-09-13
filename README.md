@@ -1,4 +1,4 @@
-# TeekHub
+# Tempo Hub
 
 One loadstring for every game I support. It checks what place you're in and
 loads the right script, so you never swap the paste out.
