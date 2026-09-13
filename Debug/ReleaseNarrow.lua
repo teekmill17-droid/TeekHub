@@ -34,6 +34,8 @@ local RunService = game:GetService("RunService")
 local lp = Players.LocalPlayer
 
 if getgenv().TeekNarrowStop then pcall(getgenv().TeekNarrowStop) end
+-- and the previous test, whose panel and buttons are at the same coordinates
+if getgenv().TeekRT2Stop then pcall(getgenv().TeekRT2Stop) end
 
 local FIRE_AT = 30
 
@@ -134,7 +136,12 @@ local function slotsNow()
             local ok, fn = pcall(function() return cn.Function end)
             if ok and type(fn) == "function" then
                 for i, v in pairs(upvaluesOf(fn) or {}) do
-                    if typeof(v) == "boolean" then
+                    -- Only ones that are currently true. The flag that keeps a
+                    -- shot alive is true while it runs, and a false one cannot
+                    -- be what we are looking for - so this both halves the
+                    -- search and stops us writing to flags we have no business
+                    -- touching.
+                    if v == true then
                         slots[#slots + 1] = {
                             key = ("%s#%d:%d"):format(s, ci, i),
                             fn = fn, idx = i, was = v,
@@ -152,6 +159,25 @@ local cands = nil       -- list of keys still in play
 local pending = nil     -- keys flipped on the shot in flight
 local rest = nil        -- the other half
 local answer = nil
+
+-- Every write we make, so every write can be undone.
+--
+-- The first cut of this file flipped booleans to false and left them there.
+-- Anything the game gates on a true flag stayed off for the rest of the
+-- session - including whatever accepts button input, which killed the
+-- controls and could only be fixed by rejoining. Nothing here writes to the
+-- game now without putting it back when the shot ends.
+local writes = {}
+
+local function undoWrites()
+    local n = 0
+    for i = #writes, 1, -1 do
+        local w = writes[i]
+        if pcall(function() debug.setupvalue(w.fn, w.idx, w.was) end) then n += 1 end
+        writes[i] = nil
+    end
+    return n
+end
 
 local function resetBisect()
     cands, pending, rest, answer = nil, nil, nil, nil
@@ -188,7 +214,10 @@ local function applyShot()
     local n = 0
     for _, k in ipairs(pending) do
         local s = byKey[k]
-        if s and pcall(function() debug.setupvalue(s.fn, s.idx, false) end) then n += 1 end
+        if s and pcall(function() debug.setupvalue(s.fn, s.idx, false) end) then
+            writes[#writes + 1] = { fn = s.fn, idx = s.idx, was = s.was }
+            n += 1
+        end
     end
     log("testing %d of %d  (flipped %d)", #pending, #cands, n)
 end
@@ -231,7 +260,7 @@ armBtn = mkButton(1, "ARM", function(b)
     b.Text = armed and "ARMED" or "ARM"
     log(armed and "armed - hold SHOOT, do not let go" or "disarmed")
 end)
-mkButton(2, "RESET", function() resetBisect() end)
+mkButton(2, "RESET", function() log("restored %d writes", undoWrites()) ; resetBisect() end)
 mkButton(3, "CLOSE", function()
     if getgenv().TeekNarrowStop then getgenv().TeekNarrowStop() end
 end)
@@ -254,7 +283,7 @@ task.spawn(function()
             end
         elseif live then
             live = false
-            if fired then pcall(verdict, peak) end
+            if fired then pcall(verdict, peak) ; pcall(undoWrites) end
             peak = 0
         end
         RunService.Heartbeat:Wait()
