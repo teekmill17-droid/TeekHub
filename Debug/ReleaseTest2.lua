@@ -1,33 +1,35 @@
 --[[
     What actually ends a mobile shot in RH2?
 
-    ConnTest.lua said firing MouseButton1Up worked. It did not prove that.
-    It fired at power 76 and called any shot ending below 84 a success - and
-    a finger lifting anywhere in that band scores exactly the same. The tester
-    said at the time they were still timing the jumpshot by hand, so those
-    readings were probably the finger, not the fire.
+    Two corrections over the first version of this file, both measured:
 
-    So this test fires at power 30. Nobody releases a jumpshot at 30 by
-    accident, which makes the result unambiguous:
+    1. It probed the button at LOAD time and found nothing connected - "down=no
+       up=no", zero boolean slots - while RH2 itself reports one connection on
+       MouseButton1Up mid-shot. Both are true: the game connects its shoot
+       handlers only while a shot is live. So everything here is probed at FIRE
+       time now, and the upvalue route finally has a function to read.
 
-        power stops near 30-40  ->  the route WORKS
+    2. The panel was 660x430 on a viewport that is about 1000x446 logical - the
+       phone screenshot is 2x retina, which is what made it look reasonable. It
+       covered most of the screen and its buttons sat on the game's own button
+       row. Everything is small and pinned to the left now, clear of the
+       controls, and nothing here is Active so taps pass through.
+
+    The test itself: fire at power 30. Nobody releases a jumpshot at 30 by
+    accident, so the verdict cannot be faked by a finger the way ConnTest's
+    could - that one fired at 76 and scored anything under 84 a pass.
+
+        power stops near 30-45  ->  the route WORKS
         power runs past 60      ->  the route does NOTHING
 
-    KEEP HOLDING THE SHOOT BUTTON until the verdict prints. Letting go early
-    is what made the last test lie.
+    KEEP HOLDING THE SHOOT BUTTON until the verdict prints.
 
-    Three routes, one per button, because guessing between them has already
-    cost four rounds:
-
+    Routes:
       FIRE UP    fire the connections on MouseButton1Up, what we ship today
-      UPVALUE    the release reads a local (u2979 in the decompile) that the
-                 button's own handler sets. Connections expose .Function, and
-                 that function closes over the same local, so debug.setupvalue
-                 can set it false directly - no input routing involved at all.
+      UPVALUE    connections expose .Function, and that closure shares the
+                 local the release loop reads, so debug.setupvalue can set it
+                 false directly with no input routing involved
       BOTH       in case one arms the other
-
-    Part 1 prints every signal on the button that has connections, so if all
-    three fail we can at least see what the game is really listening to.
 ]]
 
 local Players = game:GetService("Players")
@@ -47,47 +49,52 @@ sg.DisplayOrder = 2000000
 pcall(function() sg.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
 if not sg.Parent then sg.Parent = lp:WaitForChild("PlayerGui") end
 
+-- Left edge only. The game's controls live on the right half and along the
+-- bottom, and on a ~1000x446 viewport there is not much room to be wrong in.
 local f = Instance.new("Frame")
-f.Size = UDim2.new(0, 660, 0, 430)
-f.Position = UDim2.fromOffset(10, 10)
+f.Size = UDim2.fromOffset(430, 250)
+f.Position = UDim2.fromOffset(8, 8)
 f.BackgroundColor3 = Color3.fromRGB(6, 5, 10)
-f.BackgroundTransparency = 0.06
+f.BackgroundTransparency = 0.12
 f.BorderSizePixel = 0
+f.Active = false          -- do not swallow touches meant for the game
 f.Parent = sg
 
 local body = Instance.new("TextLabel")
-body.Size = UDim2.new(1, -12, 1, -62)
-body.Position = UDim2.fromOffset(6, 5)
+body.Size = UDim2.new(1, -10, 1, -8)
+body.Position = UDim2.fromOffset(5, 4)
 body.BackgroundTransparency = 1
 body.Font = Enum.Font.Code
-body.TextSize = 14
+body.TextSize = 13
 body.TextColor3 = Color3.fromRGB(240, 240, 245)
 body.TextXAlignment = Enum.TextXAlignment.Left
 body.TextYAlignment = Enum.TextYAlignment.Top
 body.TextWrapped = true
+body.Active = false
 body.Parent = f
 
 local lines = {}
 local function log(fmt, ...)
     local ok, m = pcall(string.format, fmt, ...)
     lines[#lines + 1] = ok and m or tostring(fmt)
-    while #lines > 22 do table.remove(lines, 1) end
+    while #lines > 16 do table.remove(lines, 1) end
     body.Text = table.concat(lines, "\n")
 end
 
 local mode = nil
 local buttons = {}
-local function mkButton(i, text, value)
+local function mkButton(i, text, value, onClick)
     local b = Instance.new("TextButton")
-    b.Size = UDim2.fromOffset(200, 48)
-    b.Position = UDim2.new(0, 8 + (i - 1) * 210, 1, -54)
+    b.Size = UDim2.fromOffset(104, 40)
+    b.Position = UDim2.fromOffset(8 + (i - 1) * 108, 262)
     b.BackgroundColor3 = Color3.fromRGB(40, 30, 70)
     b.Text = text
     b.TextColor3 = Color3.fromRGB(255, 255, 255)
     b.Font = Enum.Font.GothamBold
-    b.TextSize = 15
+    b.TextSize = 13
     b.BorderSizePixel = 0
-    b.Parent = f
+    b.Parent = sg
+    if onClick then b.MouseButton1Click:Connect(onClick) return b end
     buttons[value] = b
     b.MouseButton1Click:Connect(function()
         mode = (mode == value) and nil or value
@@ -95,8 +102,7 @@ local function mkButton(i, text, value)
             bb.BackgroundColor3 = (v == mode) and Color3.fromRGB(30, 120, 60)
                 or Color3.fromRGB(40, 30, 70)
         end
-        log(mode and ("ARMED: %s - hold SHOOT and DO NOT let go"):format(mode)
-            or "disarmed")
+        log(mode and ("ARMED %s - hold SHOOT, do not let go"):format(mode) or "disarmed")
     end)
     return b
 end
@@ -132,11 +138,10 @@ local function connsOf(obj, sigName)
     return c
 end
 
--- getupvalues is not spelled the same everywhere, so try both shapes.
 local function upvaluesOf(fn)
     if type(fn) ~= "function" then return nil end
     local ok, t = pcall(function() return debug.getupvalues(fn) end)
-    if ok and type(t) == "table" then return t end
+    if ok and type(t) == "table" and next(t) then return t end
     local out, i = {}, 1
     while i <= 40 do
         local ok2, v = pcall(function() return debug.getupvalue(fn, i) end)
@@ -147,85 +152,68 @@ local function upvaluesOf(fn)
     return next(out) and out or nil
 end
 
--- ---------------------------------------------------------------- part 1
-log("getconnections: %s", GC and "yes" or "MISSING - every route here is dead")
+local SIGS = {
+    "MouseButton1Down", "MouseButton1Up", "MouseButton1Click",
+    "InputBegan", "InputEnded", "InputChanged",
+    "TouchTap", "TouchLongPress", "Activated", "MouseLeave",
+}
 
-local d, sb = detect()
-log("button: %s", d and "found" or "NOT FOUND - hold the ball first, then reload")
-
-if d then
-    local SIGS = {
-        "MouseButton1Down", "MouseButton1Up", "MouseButton1Click",
-        "InputBegan", "InputEnded", "InputChanged",
-        "TouchTap", "TouchLongPress", "Activated", "MouseLeave",
-    }
+-- Everything below runs DURING a shot. That is the whole fix: at rest the
+-- button has no handlers connected at all.
+local function probe()
+    local d, sb = detect()
+    if not d then log("probe: no button") return end
     local found = {}
-    for _, which in ipairs({ { d, "detect" }, { sb, "ShootBTN" } }) do
-        local obj, tag = which[1], which[2]
+    for _, s in ipairs(SIGS) do
+        local c = connsOf(d, s)
+        if c and #c > 0 then found[#found + 1] = ("%s=%d"):format(s, #c) end
+    end
+    if sb ~= d then
         for _, s in ipairs(SIGS) do
-            local c = connsOf(obj, s)
-            if c and #c > 0 then found[#found + 1] = ("%s.%s=%d"):format(tag, s, #c) end
+            local c = connsOf(sb, s)
+            if c and #c > 0 then found[#found + 1] = ("SB.%s=%d"):format(s, #c) end
         end
-        if obj == sb then break end
     end
-    log("connected signals: %s", #found > 0 and table.concat(found, "  ") or "none")
+    log("live signals: %s", #found > 0 and table.concat(found, " ") or "NONE")
 end
 
--- The handler that owns the flag. MouseButton1Down is the one that sets it
--- true, so the local we want is an upvalue of that closure.
-local downFn, upFn
-do
-    local c = connsOf(d, "MouseButton1Down")
-    if c and c[1] then
-        local ok, fn = pcall(function() return c[1].Function end)
-        downFn = ok and fn or nil
-    end
-    local c2 = connsOf(d, "MouseButton1Up")
-    if c2 and c2[1] then
-        local ok, fn = pcall(function() return c2[1].Function end)
-        upFn = ok and fn or nil
-    end
-end
-log("handler functions: down=%s up=%s",
-    downFn and "yes" or "no", upFn and "yes" or "no")
-
--- Booleans are what we are after: the release loop reads one of them.
-local boolSlots = {}
-for _, pair in ipairs({ { downFn, "down" }, { upFn, "up" } }) do
-    local fn, tag = pair[1], pair[2]
-    local ups = upvaluesOf(fn)
-    if ups then
-        local desc = {}
-        for i, v in pairs(ups) do
-            desc[#desc + 1] = ("%d:%s"):format(i, typeof(v))
-            if typeof(v) == "boolean" then
-                boolSlots[#boolSlots + 1] = { fn = fn, idx = i, tag = tag, was = v }
+-- Collect the boolean upvalues of whatever handlers are connected right now.
+local function boolSlots()
+    local d = detect()
+    local slots, seen = {}, {}
+    for _, s in ipairs({ "MouseButton1Down", "MouseButton1Up", "InputBegan", "InputEnded" }) do
+        local c = connsOf(d, s)
+        for _, cn in ipairs(c or {}) do
+            local ok, fn = pcall(function() return cn.Function end)
+            if ok and type(fn) == "function" and not seen[fn] then
+                seen[fn] = true
+                local ups = upvaluesOf(fn)
+                for i, v in pairs(ups or {}) do
+                    if typeof(v) == "boolean" then
+                        slots[#slots + 1] = { fn = fn, idx = i, sig = s, was = v }
+                    end
+                end
             end
         end
-        table.sort(desc)
-        log("%s upvalues: %s", tag, table.concat(desc, " "))
-    else
-        log("%s upvalues: unavailable", tag)
     end
+    return slots
 end
-log("boolean slots to try: %d", #boolSlots)
 
--- ---------------------------------------------------------------- part 2
 local function fireUp()
-    local dd = detect()
-    local c = connsOf(dd, "MouseButton1Up")
+    local d = detect()
     local n = 0
-    if c then
-        for _, cn in ipairs(c) do
-            if pcall(function() cn:Fire() end) then n += 1 end
-        end
+    for _, cn in ipairs(connsOf(d, "MouseButton1Up") or {}) do
+        if pcall(function() cn:Fire() end) then n += 1 end
     end
     return n
 end
 
-local function setBools()
+-- Flip every boolean the handlers close over. Crude on purpose: we do not know
+-- which one the release loop reads, and a wrong flip on a test shot costs
+-- nothing. If this works, the next step is to find the single right index.
+local function setBools(slots)
     local n = 0
-    for _, s in ipairs(boolSlots) do
+    for _, s in ipairs(slots) do
         if pcall(function() debug.setupvalue(s.fn, s.idx, false) end) then n += 1 end
     end
     return n
@@ -234,28 +222,40 @@ end
 mkButton(1, "FIRE UP", "fireup")
 mkButton(2, "UPVALUE", "upvalue")
 mkButton(3, "BOTH", "both")
+mkButton(4, "CLOSE", nil, function()
+    if getgenv().TeekRT2Stop then getgenv().TeekRT2Stop() end
+end)
+
+log("getconnections: %s", GC and "yes" or "MISSING - every route here is dead")
+log("setupvalue: %s", (type(debug) == "table" and debug.setupvalue) and "yes" or "MISSING")
+log("handlers connect only mid-shot, so probing happens at fire time")
+log("pick a route, hold the GAME's SHOOT button, DO NOT let go")
 
 task.spawn(function()
-    local live, peak, firedAt = false, 0, nil
+    local live, peak, firedAt, probed = false, 0, nil, false
     while sg.Parent do
         local v = power()
         if v > 0 then
-            if not live then live, peak, firedAt = true, v, nil end
+            if not live then live, peak, firedAt, probed = true, v, nil, false end
             if v > peak then peak = v end
+            if not probed then probed = true ; pcall(probe) end
             if mode and not firedAt and v >= FIRE_AT then
                 firedAt = v
                 local a = (mode ~= "upvalue") and fireUp() or 0
-                local b = (mode ~= "fireup") and setBools() or 0
+                local b = 0
+                if mode ~= "fireup" then
+                    local slots = boolSlots()
+                    b = setBools(slots)
+                    log("bool slots found: %d", #slots)
+                end
                 log("fired at %.1f  (up=%d conns, bools=%d)", v, a, b)
             end
         elseif live then
             live = false
             if firedAt then
-                -- The only thing that matters. A shot that keeps climbing
-                -- past 60 was ended by the finger, not by us.
                 local worked = peak < FIRE_AT + 15
-                log("  -> ended at %.1f   %s", peak,
-                    worked and "*** THIS ROUTE WORKS ***" or "route did nothing")
+                log("  -> ended at %.1f  %s", peak,
+                    worked and "*** ROUTE WORKS ***" or "route did nothing")
             end
             peak = 0
         end
@@ -267,5 +267,3 @@ getgenv().TeekRT2Stop = function()
     pcall(function() sg:Destroy() end)
     getgenv().TeekRT2Stop = nil
 end
-
-log("pick a route, hold the GAME's SHOOT button, DO NOT let go until verdict")
